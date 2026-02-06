@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vchilikov/takeout-fix/internal/patharg"
 	"github.com/vchilikov/takeout-fix/internal/timezonemapper"
 )
 
@@ -143,7 +144,7 @@ func buildExiftoolArgs(jsonPath string, outMediaPath string, offset string) []st
 	args := []string{
 		"-d", "%s",
 		"-m",
-		"-TagsFromFile", safePathArg(jsonPath),
+		"-TagsFromFile", patharg.Safe(jsonPath),
 		"-Title<Title",
 		"-Description<Description",
 		"-ImageDescription<Description",
@@ -165,15 +166,8 @@ func buildExiftoolArgs(jsonPath string, outMediaPath string, offset string) []st
 		)
 	}
 
-	args = append(args, "--", safePathArg(outMediaPath))
+	args = append(args, "--", patharg.Safe(outMediaPath))
 	return args
-}
-
-func safePathArg(path string) string {
-	if strings.HasPrefix(path, "-") {
-		return "." + string(filepath.Separator) + path
-	}
-	return path
 }
 
 func hasSupportedExtension(path string) bool {
@@ -191,6 +185,7 @@ func hasSupportedExtension(path string) bool {
 		".mp4",
 		".png",
 		".tif",
+		".tiff",
 	}
 
 	for _, supportedExt := range exifSupportExtensions {

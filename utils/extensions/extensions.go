@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/vchilikov/takeout-fix/internal/patharg"
 )
 
 func Fix(mediaPath string) (string, error) {
@@ -36,7 +38,7 @@ func Fix(mediaPath string) (string, error) {
 }
 
 func getNewExtension(mediaPath string) (string, error) {
-	cmd := exec.Command("exiftool", "-p", ".$FileTypeExtension", "--", safePathArg(mediaPath))
+	cmd := exec.Command("exiftool", "-p", ".$FileTypeExtension", "--", patharg.Safe(mediaPath))
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -105,11 +107,4 @@ func generateRandomSuffix() (string, error) {
 func doesFileExist(filePath string) bool {
 	_, err := os.Stat(filePath)
 	return !os.IsNotExist(err)
-}
-
-func safePathArg(path string) string {
-	if strings.HasPrefix(path, "-") {
-		return "." + string(filepath.Separator) + path
-	}
-	return path
 }

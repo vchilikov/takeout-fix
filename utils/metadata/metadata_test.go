@@ -12,18 +12,11 @@ func TestHasSupportedExtension(t *testing.T) {
 	if !hasSupportedExtension("photo.JPEG") {
 		t.Fatalf("expected JPEG extension to be supported")
 	}
+	if !hasSupportedExtension("photo.TIFF") {
+		t.Fatalf("expected TIFF extension to be supported")
+	}
 	if hasSupportedExtension("photo.webp") {
 		t.Fatalf("expected WEBP extension to be unsupported")
-	}
-}
-
-func TestSafePathArg(t *testing.T) {
-	want := "." + string(filepath.Separator) + "-meta.json"
-	if got := safePathArg("-meta.json"); got != want {
-		t.Fatalf("expected sanitized path, got %q", got)
-	}
-	if got := safePathArg("/tmp/-meta.json"); got != "/tmp/-meta.json" {
-		t.Fatalf("absolute path should not change, got %q", got)
 	}
 }
 

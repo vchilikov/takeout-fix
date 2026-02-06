@@ -1,7 +1,6 @@
 package extensions
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,15 +37,5 @@ func TestGenerateRandomSuffix(t *testing.T) {
 		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789", r) {
 			t.Fatalf("unexpected rune in suffix: %q", r)
 		}
-	}
-}
-
-func TestSafePathArg(t *testing.T) {
-	want := "." + string(filepath.Separator) + "-input.jpg"
-	if got := safePathArg("-input.jpg"); got != want {
-		t.Fatalf("expected sanitized path, got %q", got)
-	}
-	if got := safePathArg("/tmp/-input.jpg"); got != "/tmp/-input.jpg" {
-		t.Fatalf("absolute path should not change, got %q", got)
 	}
 }
