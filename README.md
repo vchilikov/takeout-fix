@@ -106,9 +106,11 @@ Releases are automated with GitHub Actions + GoReleaser.
 To publish a new version:
 
 ```bash
-git tag vX.Y.Z
+git tag 2026.02.1
 git push --tags
 ```
+
+Release tags must match `YYYY.MM.N` and point to the current `main` HEAD.
 
 After pushing a tag, GitHub creates a release with binaries for Linux/macOS/Windows (`amd64` + `arm64`) and a `checksums.txt` file.
 

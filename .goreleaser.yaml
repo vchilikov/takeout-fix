@@ -18,7 +18,7 @@ builds:
 
 archives:
   - id: release-archive
-    builds:
+    ids:
       - takeoutfix
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 

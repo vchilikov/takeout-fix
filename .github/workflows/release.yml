@@ -3,7 +3,7 @@ name: release
 on:
   push:
     tags:
-      - "v*"
+      - "*.*.*"
 
 permissions:
   contents: write
@@ -17,6 +17,30 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate tag format
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.[0-9]+$ ]]; then
+            echo "Invalid tag format: '$TAG'"
+            echo "Expected: YYYY.MM.N (example: 2026.02.1)"
+            exit 1
+          fi
+
+      - name: Ensure tag points to main HEAD
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          TAG_COMMIT="$(git rev-list -n 1 "$GITHUB_REF")"
+          MAIN_HEAD="$(git rev-parse origin/main)"
+
+          if [[ "$TAG_COMMIT" != "$MAIN_HEAD" ]]; then
+            echo "Release tags must point to current main HEAD."
+            echo "tag commit:  $TAG_COMMIT"
+            echo "main commit: $MAIN_HEAD"
+            exit 1
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -29,7 +53,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
