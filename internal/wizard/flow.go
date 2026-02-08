@@ -67,7 +67,7 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 		for _, dep := range missing {
 			writef(out, "Running: %s\n", strings.Join(dep.InstallCmd, " "))
 		}
-		if err := installDependencies(missing, in, out); err != nil {
+		if err := installDependencies(missing, reader, out); err != nil {
 			writef(out, "Dependency install failed: %v\n", err)
 			report.addProblem("dependency install errors", 1, err.Error())
 			return finish(ExitPreflightFail)
