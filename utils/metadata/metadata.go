@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vchilikov/takeout-fix/internal/exifcmd"
+	"github.com/vchilikov/takeout-fix/internal/mediaext"
 	"github.com/vchilikov/takeout-fix/internal/patharg"
 )
 
@@ -115,27 +116,10 @@ func shouldWriteFileCreateDate() bool {
 
 func hasSupportedExtension(path string) bool {
 	ext := filepath.Ext(path)
-
-	var exifSupportExtensions = []string{
-		".3gp",
-		".dng",
-		".gif",
-		".heic",
-		".jpeg",
-		".jpg",
-		".m4v",
-		".mov",
-		".mp4",
-		".png",
-		".tif",
-		".tiff",
-	}
-
-	for _, supportedExt := range exifSupportExtensions {
+	for _, supportedExt := range mediaext.Supported {
 		if strings.EqualFold(ext, supportedExt) {
 			return true
 		}
 	}
-
 	return false
 }

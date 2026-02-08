@@ -160,5 +160,5 @@ func generateRandomSuffix() (string, error) {
 
 func doesFileExist(filePath string) bool {
 	_, err := os.Stat(filePath)
-	return !os.IsNotExist(err)
+	return err == nil
 }

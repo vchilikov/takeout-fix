@@ -32,6 +32,7 @@ func Start() (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
+	// Merge stderr into the same pipe so we can detect error messages from exiftool.
 	cmd.Stderr = cmd.Stdout
 
 	stdinPipe, err := cmd.StdinPipe()
@@ -69,6 +70,7 @@ func (s *Session) Run(args []string) (string, error) {
 
 	output, err := s.readUntilReady()
 	if err != nil {
+		s.closed = true
 		return output, err
 	}
 	if hasErrorLine(output) {
