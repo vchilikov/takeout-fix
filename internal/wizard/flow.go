@@ -92,8 +92,17 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 	}
 	report.ArchiveFound = len(zips)
 	if len(zips) == 0 {
-		if _, err := os.Stat(dest); err != nil {
-			writeLine(out, "No ZIP archives found and no extracted data.")
+		info, err := os.Stat(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeLine(out, "No ZIP archives found and no extracted data.")
+				return finish(ExitPreflightFail)
+			}
+			report.addProblem("extracted data access error", 1, err.Error())
+			return finish(ExitRuntimeFail)
+		}
+		if !info.IsDir() {
+			writeLine(out, "No ZIP archives found and extracted data path is not a directory.")
 			return finish(ExitPreflightFail)
 		}
 		writeLine(out, "No ZIP archives found. Re-processing previously extracted data...")
@@ -115,43 +124,52 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 		}
 		writeLine(out, "All ZIP archives are valid.")
 
-		writeLine(out, "Checking available disk space...")
-		diskCheckStartedAt := time.Now()
-		space, err := checkDiskSpace(cwd, integrity.Checked)
-		report.DiskCheckDuration = time.Since(diskCheckStartedAt)
-		if err != nil {
-			report.addProblem("disk check errors", 1, err.Error())
-			return finish(ExitRuntimeFail)
-		}
-		report.Disk = space
-		writef(
-			out,
-			"Disk: available=%s, required=%s, required with delete-mode=%s\n",
-			preflight.FormatBytes(space.AvailableBytes),
-			preflight.FormatBytes(space.RequiredBytes),
-			preflight.FormatBytes(space.RequiredWithDeleteBytes),
-		)
-
-		deleteMode := false
-		if !space.Enough {
-			writeLine(out, "Not enough disk space for normal mode.")
-			if !askYesNo(reader, out, "Enable delete-mode (remove ZIP right after successful extraction)? [y/N]: ") {
-				return finish(ExitPreflightFail)
-			}
-			if !space.EnoughWithDelete {
-				writeLine(out, "Still not enough space even with delete-mode.")
-				return finish(ExitPreflightFail)
-			}
-			deleteMode = true
-		}
-		report.DeleteMode = deleteMode
-
 		statePath := filepath.Join(cwd, ".takeoutfix", "state.json")
 		st, err := loadState(statePath)
 		if err != nil {
 			report.addProblem("state load errors", 1, err.Error())
 			st = state.New()
 		}
+
+		var pending []preflight.ArchiveIntegrity
+		for _, ai := range integrity.Checked {
+			if !shouldSkip(st, ai.Archive.Name, ai.Archive.Fingerprint) {
+				pending = append(pending, ai)
+			}
+		}
+
+		deleteMode := false
+		if len(pending) > 0 {
+			writeLine(out, "Checking available disk space...")
+			diskCheckStartedAt := time.Now()
+			space, err := checkDiskSpace(cwd, pending)
+			report.DiskCheckDuration = time.Since(diskCheckStartedAt)
+			if err != nil {
+				report.addProblem("disk check errors", 1, err.Error())
+				return finish(ExitRuntimeFail)
+			}
+			report.Disk = space
+			writef(
+				out,
+				"Disk: available=%s, required=%s, required with delete-mode=%s\n",
+				preflight.FormatBytes(space.AvailableBytes),
+				preflight.FormatBytes(space.RequiredBytes),
+				preflight.FormatBytes(space.RequiredWithDeleteBytes),
+			)
+
+			if !space.Enough {
+				writeLine(out, "Not enough disk space for normal mode.")
+				if !askYesNo(reader, out, "Enable delete-mode (remove ZIP right after successful extraction)? [y/N]: ") {
+					return finish(ExitPreflightFail)
+				}
+				if !space.EnoughWithDelete {
+					writeLine(out, "Still not enough space even with delete-mode.")
+					return finish(ExitPreflightFail)
+				}
+				deleteMode = true
+			}
+		}
+		report.DeleteMode = deleteMode
 
 		writef(out, "Extracting archives into: %s\n", dest)
 		extractStartedAt := time.Now()

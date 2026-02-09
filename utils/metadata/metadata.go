@@ -70,6 +70,15 @@ func ApplyDetailedWithRunner(
 				if retryErr == nil {
 					return result, nil
 				}
+				if includeCreateDate && strings.Contains(strings.ToLower(retryOutput), "filecreatedate") {
+					fallbackArgs := buildExiftoolArgs(jsonPath, outMediaPath, false)
+					fallbackOutput, fallbackErr := run(fallbackArgs)
+					if fallbackErr == nil {
+						result.CreateDateWarned = true
+						return result, nil
+					}
+					return result, fmt.Errorf("could not fix metadata for %s after stripping corrupt EXIF\nerror: %w\noutput: %s", mediaPath, fallbackErr, fallbackOutput)
+				}
 				return result, fmt.Errorf("could not fix metadata for %s after stripping corrupt EXIF\nerror: %w\noutput: %s", mediaPath, retryErr, retryOutput)
 			}
 		}

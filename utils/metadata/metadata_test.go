@@ -207,6 +207,36 @@ func TestApplyDetailedWithRunner_RetriesOnErrorReading(t *testing.T) {
 	}
 }
 
+func TestApplyDetailedWithRunner_FileCreateDateFallbackAfterStrip(t *testing.T) {
+	callCount := 0
+	runner := func(args []string) (string, error) {
+		callCount++
+		switch callCount {
+		case 1: // initial apply fails with corrupt EXIF
+			return "Error: Bad format (0) for ExifIFD entry 25\n", fmt.Errorf("exiftool failed")
+		case 2: // strip succeeds
+			return "1 image files updated\n", nil
+		case 3: // retry after strip fails with FileCreateDate error
+			return "Warning: Sorry, FileCreateDate is not supported\n", fmt.Errorf("exiftool failed")
+		case 4: // fallback without FileCreateDate succeeds
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", callCount)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("photo.jpg", "meta.json", runner)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.CreateDateWarned {
+		t.Fatalf("expected CreateDateWarned to be true")
+	}
+	if callCount != 4 {
+		t.Fatalf("expected 4 runner calls, got %d", callCount)
+	}
+}
+
 func TestLooksLikeCorruptExif(t *testing.T) {
 	tests := []struct {
 		name   string
