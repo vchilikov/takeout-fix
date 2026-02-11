@@ -60,7 +60,7 @@ Windows (PowerShell):
 - Supported OS: macOS, Linux, Windows.
 - `exiftool` must be available in `PATH`.
 - If `exiftool` is missing, use the one-liner installer above or install it manually.
-- You need enough free disk space for extraction and processing.
+- You need enough free disk space for extraction.
 
 ## What You Will See in the Terminal
 
@@ -83,7 +83,7 @@ After a successful run (`Status: SUCCESS`):
 
 - Processed files are in `./takeoutfix-extracted`.
 - Upload `./takeoutfix-extracted/Takeout` to your new cloud storage.
-- Do not upload original Takeout ZIP files.
+- Original Takeout ZIP files are auto-removed right after successful extraction.
 
 Technical state is saved in `./.takeoutfix/state.json` so reruns can skip unchanged archives.
 
@@ -106,8 +106,8 @@ Yandex Disk Russian guide: [docs/clouds/yandex-disk.ru.md](docs/clouds/yandex-di
   - Re-download broken archive parts from Google Takeout, then rerun.
 - `Missing dependencies: exiftool`
   - Run the one-liner installer command for your OS, or install `exiftool` manually and rerun.
-- `Not enough disk space for normal mode.`
-  - Use delete mode when prompted or free up disk space.
+- `Not enough disk space even with auto-delete enabled.`
+  - Free up disk space and rerun.
 
 ## Developer Appendix (Optional)
 

@@ -24,7 +24,7 @@ This folder stores screenshots used by README and cloud guides.
 3. `03_takeoutfix_run_command.png`
 4. `04_takeoutfix_dependency_prompt.png`
 5. `05_takeoutfix_zip_validation.png`
-6. `06_takeoutfix_disk_check_delete_mode_prompt.png`
+6. `06_takeoutfix_disk_check_auto_delete.png`
 7. `07_takeoutfix_processing_progress.png`
 8. `08_takeoutfix_final_summary_success.png`
 9. `09_takeoutfix_output_folder_tree.png`

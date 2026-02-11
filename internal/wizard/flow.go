@@ -1,7 +1,6 @@
 package wizard
 
 import (
-	"bufio"
 	"io"
 	"os"
 	"path/filepath"
@@ -36,10 +35,8 @@ var (
 	removeFile         = os.Remove
 )
 
-func Run(cwd string, in io.Reader, out io.Writer) int {
+func Run(cwd string, _ io.Reader, out io.Writer) int {
 	runStartedAt := time.Now()
-
-	reader := bufio.NewReader(in)
 	report := Report{Status: "FAILED"}
 	finish := func(code int) int {
 		report.TotalDuration = time.Since(runStartedAt)
@@ -123,7 +120,7 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 			}
 		}
 
-		deleteMode := false
+		autoDelete := true
 		if len(pending) > 0 {
 			writeLine(out, "Checking available disk space...")
 			diskCheckStartedAt := time.Now()
@@ -136,25 +133,18 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 			report.Disk = space
 			writef(
 				out,
-				"Disk: available=%s, required=%s, required with delete-mode=%s\n",
+				"Disk: available=%s, required=%s, required with auto-delete=%s\n",
 				preflight.FormatBytes(space.AvailableBytes),
 				preflight.FormatBytes(space.RequiredBytes),
 				preflight.FormatBytes(space.RequiredWithDeleteBytes),
 			)
 
-			if !space.Enough {
-				writeLine(out, "Not enough disk space for normal mode.")
-				if !askYesNo(reader, out, "Enable delete-mode (remove ZIP right after successful extraction)? [y/N]: ") {
-					return finish(ExitPreflightFail)
-				}
-				if !space.EnoughWithDelete {
-					writeLine(out, "Still not enough space even with delete-mode.")
-					return finish(ExitPreflightFail)
-				}
-				deleteMode = true
+			if !space.EnoughWithDelete {
+				writeLine(out, "Not enough disk space even with auto-delete enabled.")
+				return finish(ExitPreflightFail)
 			}
 		}
-		report.DeleteMode = deleteMode
+		report.AutoDelete = autoDelete
 
 		writef(out, "Extracting archives into: %s\n", dest)
 		extractStartedAt := time.Now()
@@ -162,6 +152,22 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 		doneArchives := 0
 		for _, archive := range zips {
 			if shouldSkip(st, archive.Name, archive.Fingerprint) {
+				entry := st.Archives[archive.Name]
+				entry.Fingerprint = archive.Fingerprint
+				entry.Extracted = true
+
+				if err := removeFile(archive.Path); err != nil {
+					report.DeleteErrors = append(report.DeleteErrors, archive.Name)
+					entry.Deleted = false
+				} else {
+					report.DeletedZips++
+					entry.Deleted = true
+				}
+				st.Archives[archive.Name] = entry
+				if err := saveState(statePath, st); err != nil {
+					report.addProblem("state save errors", 1, err.Error())
+				}
+
 				report.SkippedArchives++
 				doneArchives++
 				writef(out, "Extraction progress: %d/%d (%d%%) skipped: %s\n", doneArchives, totalArchives, progressPercent(doneArchives, totalArchives), archive.Name)
@@ -181,13 +187,12 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 			writef(out, "Extraction progress: %d/%d (%d%%) extracted: %s\n", doneArchives, totalArchives, progressPercent(doneArchives, totalArchives), archive.Name)
 
 			entry := state.ArchiveState{Fingerprint: archive.Fingerprint, Extracted: true}
-			if deleteMode {
-				if err := removeFile(archive.Path); err != nil {
-					report.DeleteErrors = append(report.DeleteErrors, archive.Name)
-				} else {
-					report.DeletedZips++
-					entry.Deleted = true
-				}
+			if err := removeFile(archive.Path); err != nil {
+				report.DeleteErrors = append(report.DeleteErrors, archive.Name)
+				entry.Deleted = false
+			} else {
+				report.DeletedZips++
+				entry.Deleted = true
 			}
 			st.Archives[archive.Name] = entry
 
@@ -237,18 +242,6 @@ func Run(cwd string, in io.Reader, out io.Writer) int {
 
 	report.Status = "SUCCESS"
 	return finish(ExitSuccess)
-}
-
-func askYesNo(reader *bufio.Reader, out io.Writer, prompt string) bool {
-	writef(out, "%s", prompt)
-	line, _ := reader.ReadString('\n')
-	value := strings.TrimSpace(strings.ToLower(line))
-	switch value {
-	case "y", "yes":
-		return true
-	default:
-		return false
-	}
 }
 
 func progressPercent(done int, total int) int {
