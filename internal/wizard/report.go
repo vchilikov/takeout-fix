@@ -17,7 +17,7 @@ type Report struct {
 	CorruptNames   []string
 
 	Disk       preflight.SpaceCheck
-	DeleteMode bool
+	AutoDelete bool
 
 	ExtractedArchives int
 	SkippedArchives   int
@@ -74,7 +74,7 @@ func printReport(out io.Writer, report Report) {
 	writeLine(out, "Final summary")
 	writef(out, "Status: %s\n", report.Status)
 	writef(out, "Archives: found=%d, valid=%d, corrupt=%d\n", report.ArchiveFound, report.ArchiveValid, report.ArchiveCorrupt)
-	writef(out, "Disk: available=%s, required=%s, delete-mode=%t\n", preflight.FormatBytes(report.Disk.AvailableBytes), preflight.FormatBytes(report.Disk.RequiredBytes), report.DeleteMode)
+	writef(out, "Disk: available=%s, required=%s, auto-delete=%t\n", preflight.FormatBytes(report.Disk.AvailableBytes), preflight.FormatBytes(report.Disk.RequiredBytes), report.AutoDelete)
 	writef(out, "Extraction: extracted archives=%d, skipped=%d, extracted files=%d, deleted zips=%d\n", report.ExtractedArchives, report.SkippedArchives, report.ExtractedFiles, report.DeletedZips)
 	writef(out, "Metadata: media=%d, applied=%d, renamed=%d, xmp=%d, missing json=%d, ambiguous=%d\n", report.MediaFound, report.MetadataApplied, report.RenamedExtensions, report.XMPSidecars, report.MissingJSON, report.AmbiguousMedia)
 	writef(out, "JSON cleanup: removed=%d, kept due to errors=%d, kept unused=%d\n", report.JSONRemoved, report.JSONKeptDueToErrors, report.UnusedJSON)

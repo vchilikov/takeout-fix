@@ -24,7 +24,7 @@ func TestRunStopsOnCorruptZip(t *testing.T) {
 		return preflight.IntegritySummary{Checked: []preflight.ArchiveIntegrity{corrupt}, Corrupt: []preflight.ArchiveIntegrity{corrupt}}
 	}
 	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
-		return preflight.SpaceCheck{Enough: true}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true}, nil
 	}
 
 	extractCalled := false
@@ -90,7 +90,7 @@ func TestRunRerunAfterArchiveReplace(t *testing.T) {
 	diskCheckCalls := 0
 	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
 		diskCheckCalls++
-		return preflight.SpaceCheck{Enough: true, AvailableBytes: 10, RequiredBytes: 1}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true, AvailableBytes: 10, RequiredBytes: 1}, nil
 	}
 
 	integrityCorrupt := true
@@ -171,6 +171,92 @@ func TestRunAlwaysUsesEnglishWithoutLanguagePrompt(t *testing.T) {
 	}
 }
 
+func TestRunContinuesWhenOnlyAutoDeleteFits(t *testing.T) {
+	restore := stubWizardDeps()
+	defer restore()
+
+	checkDependencies = func() []preflight.Dependency { return nil }
+	discoverZips = func(string) ([]preflight.ZipArchive, error) {
+		return []preflight.ZipArchive{{Name: "a.zip", Path: "/tmp/a.zip", Fingerprint: "f1"}}, nil
+	}
+	validateAll = func(zips []preflight.ZipArchive) preflight.IntegritySummary {
+		return preflight.IntegritySummary{
+			Checked:           []preflight.ArchiveIntegrity{{Archive: zips[0], FileCount: 1, UncompressedBytes: 100}},
+			TotalUncompressed: 100,
+			TotalZipBytes:     20,
+		}
+	}
+	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
+		return preflight.SpaceCheck{
+			AvailableBytes:          90,
+			RequiredBytes:           120,
+			RequiredWithDeleteBytes: 80,
+			Enough:                  false,
+			EnoughWithDelete:        true,
+		}, nil
+	}
+	loadState = func(string) (state.RunState, error) { return state.New(), nil }
+	saveState = func(string, state.RunState) error { return nil }
+	extractArchiveFile = func(string, string) (int, error) { return 1, nil }
+	removeFile = func(string) error { return nil }
+	processTakeout = func(string, func(processor.ProgressEvent)) (processor.Report, error) {
+		return processor.Report{}, nil
+	}
+
+	var out bytes.Buffer
+	code := Run(t.TempDir(), bytes.NewBufferString(""), &out)
+	if code != ExitSuccess {
+		t.Fatalf("expected success, got %d\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("required with auto-delete")) {
+		t.Fatalf("expected auto-delete disk line, got:\n%s", out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("Enable delete-mode")) {
+		t.Fatalf("did not expect interactive delete-mode prompt, got:\n%s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("auto-delete=true")) {
+		t.Fatalf("expected final summary to report auto-delete=true, got:\n%s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("deleted zips=1")) {
+		t.Fatalf("expected extracted archive to be auto-deleted, got:\n%s", out.String())
+	}
+}
+
+func TestRunFailsWhenAutoDeleteIsInsufficient(t *testing.T) {
+	restore := stubWizardDeps()
+	defer restore()
+
+	checkDependencies = func() []preflight.Dependency { return nil }
+	discoverZips = func(string) ([]preflight.ZipArchive, error) {
+		return []preflight.ZipArchive{{Name: "a.zip", Path: "/tmp/a.zip", Fingerprint: "f1"}}, nil
+	}
+	validateAll = func(zips []preflight.ZipArchive) preflight.IntegritySummary {
+		return preflight.IntegritySummary{
+			Checked:           []preflight.ArchiveIntegrity{{Archive: zips[0], FileCount: 1, UncompressedBytes: 100}},
+			TotalUncompressed: 100,
+			TotalZipBytes:     20,
+		}
+	}
+	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
+		return preflight.SpaceCheck{
+			AvailableBytes:          70,
+			RequiredBytes:           120,
+			RequiredWithDeleteBytes: 90,
+			Enough:                  false,
+			EnoughWithDelete:        false,
+		}, nil
+	}
+
+	var out bytes.Buffer
+	code := Run(t.TempDir(), bytes.NewBufferString(""), &out)
+	if code != ExitPreflightFail {
+		t.Fatalf("expected preflight fail, got %d\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("Not enough disk space even with auto-delete enabled.")) {
+		t.Fatalf("expected explicit auto-delete failure message, got:\n%s", out.String())
+	}
+}
+
 func TestRunAutoLanguageEnglishWithoutPrompt(t *testing.T) {
 	restore := stubWizardDeps()
 	defer restore()
@@ -216,7 +302,7 @@ func TestRunShowsExtractionProgressForSkippedAndExtracted(t *testing.T) {
 	var diskCheckArchives []preflight.ArchiveIntegrity
 	checkDiskSpace = func(_ string, archives []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
 		diskCheckArchives = append([]preflight.ArchiveIntegrity(nil), archives...)
-		return preflight.SpaceCheck{Enough: true, AvailableBytes: 1024, RequiredBytes: 128}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true, AvailableBytes: 1024, RequiredBytes: 128}, nil
 	}
 
 	shouldSkip = func(_ state.RunState, name string, _ string) bool { return name == "a.zip" }
@@ -271,7 +357,7 @@ func TestRunShowsThrottledProcessingProgress(t *testing.T) {
 		}
 	}
 	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
-		return preflight.SpaceCheck{Enough: true, AvailableBytes: 10, RequiredBytes: 1}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true, AvailableBytes: 10, RequiredBytes: 1}, nil
 	}
 	loadState = func(string) (state.RunState, error) { return state.New(), nil }
 	saveState = func(string, state.RunState) error { return nil }
@@ -321,7 +407,7 @@ func TestRunShowsEmptyProcessingProgress(t *testing.T) {
 		}
 	}
 	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
-		return preflight.SpaceCheck{Enough: true, AvailableBytes: 10, RequiredBytes: 1}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true, AvailableBytes: 10, RequiredBytes: 1}, nil
 	}
 	loadState = func(string) (state.RunState, error) { return state.New(), nil }
 	saveState = func(string, state.RunState) error { return nil }
@@ -361,7 +447,7 @@ func TestRunPassesValidatedArchivesToDiskCheck(t *testing.T) {
 	var gotArchives []preflight.ArchiveIntegrity
 	checkDiskSpace = func(_ string, archives []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
 		gotArchives = append([]preflight.ArchiveIntegrity(nil), archives...)
-		return preflight.SpaceCheck{Enough: true, AvailableBytes: 1024, RequiredBytes: 256}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true, AvailableBytes: 1024, RequiredBytes: 256}, nil
 	}
 
 	loadState = func(string) (state.RunState, error) { return state.New(), nil }
@@ -498,12 +584,21 @@ func TestRunSkipsDiskCheckWhenAllArchivesExtracted(t *testing.T) {
 	diskCheckCalled := false
 	checkDiskSpace = func(string, []preflight.ArchiveIntegrity) (preflight.SpaceCheck, error) {
 		diskCheckCalled = true
-		return preflight.SpaceCheck{Enough: true}, nil
+		return preflight.SpaceCheck{Enough: true, EnoughWithDelete: true}, nil
 	}
 
 	shouldSkip = func(_ state.RunState, _ string, _ string) bool { return true }
-	loadState = func(string) (state.RunState, error) { return state.New(), nil }
-	saveState = func(string, state.RunState) error { return nil }
+	stored := state.New()
+	loadState = func(string) (state.RunState, error) { return stored, nil }
+	saveState = func(_ string, st state.RunState) error {
+		stored = st
+		return nil
+	}
+	removed := make([]string, 0, 2)
+	removeFile = func(path string) error {
+		removed = append(removed, path)
+		return nil
+	}
 	extractArchiveFile = func(string, string) (int, error) {
 		t.Fatalf("extract should not be called when all archives are skipped")
 		return 0, nil
@@ -522,6 +617,21 @@ func TestRunSkipsDiskCheckWhenAllArchivesExtracted(t *testing.T) {
 	}
 	if bytes.Contains(out.Bytes(), []byte("Checking available disk space...")) {
 		t.Fatalf("expected no disk check in output, got:\n%s", out.String())
+	}
+	if len(removed) != 2 {
+		t.Fatalf("expected 2 skipped archives to be deleted, got %d", len(removed))
+	}
+	if !bytes.Contains(out.Bytes(), []byte("deleted zips=2")) {
+		t.Fatalf("expected summary with deleted zips=2, got:\n%s", out.String())
+	}
+	for _, name := range []string{"a.zip", "b.zip"} {
+		entry, ok := stored.Archives[name]
+		if !ok {
+			t.Fatalf("expected state entry for %s", name)
+		}
+		if !entry.Extracted || !entry.Deleted {
+			t.Fatalf("expected state entry for %s to be extracted+deleted, got %+v", name, entry)
+		}
 	}
 }
 
