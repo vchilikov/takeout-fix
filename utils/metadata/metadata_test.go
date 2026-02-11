@@ -12,6 +12,9 @@ func TestHasSupportedExtension(t *testing.T) {
 	if !hasSupportedExtension("photo.JPEG") {
 		t.Fatalf("expected JPEG extension to be supported")
 	}
+	if !hasSupportedExtension("photo.heIf") {
+		t.Fatalf("expected HEIF extension to be supported")
+	}
 	if !hasSupportedExtension("photo.TIFF") {
 		t.Fatalf("expected TIFF extension to be supported")
 	}
@@ -51,6 +54,38 @@ func TestBuildExiftoolArgs_ExcludeCreateDateWhenDisabled(t *testing.T) {
 	args := buildExiftoolArgs("meta.json", "photo.jpg", false)
 	if slices.Contains(args, "-FileCreateDate<PhotoTakenTimeTimestamp") {
 		t.Fatalf("did not expect FileCreateDate mapping when disabled, got: %v", args)
+	}
+}
+
+func TestBuildExiftoolArgs_HEICIncludesQuickTimeAndKeysDates(t *testing.T) {
+	args := buildExiftoolArgs("meta.json", "photo.HEIC", true)
+
+	want := []string{
+		"-QuickTime:CreateDate<PhotoTakenTimeTimestamp",
+		"-QuickTime:ModifyDate<PhotoTakenTimeTimestamp",
+		"-QuickTime:TrackCreateDate<PhotoTakenTimeTimestamp",
+		"-QuickTime:TrackModifyDate<PhotoTakenTimeTimestamp",
+		"-QuickTime:MediaCreateDate<PhotoTakenTimeTimestamp",
+		"-QuickTime:MediaModifyDate<PhotoTakenTimeTimestamp",
+		"-Keys:CreationDate<PhotoTakenTimeTimestamp",
+	}
+
+	for _, tag := range want {
+		if !slices.Contains(args, tag) {
+			t.Fatalf("expected %q in args, got: %v", tag, args)
+		}
+	}
+}
+
+func TestBuildExiftoolArgs_JPEGDoesNotIncludeQuickTimeAndKeysDates(t *testing.T) {
+	args := buildExiftoolArgs("meta.json", "photo.jpg", true)
+	for _, tag := range []string{
+		"-QuickTime:CreateDate<PhotoTakenTimeTimestamp",
+		"-Keys:CreationDate<PhotoTakenTimeTimestamp",
+	} {
+		if slices.Contains(args, tag) {
+			t.Fatalf("did not expect %q for jpeg, got: %v", tag, args)
+		}
 	}
 }
 
