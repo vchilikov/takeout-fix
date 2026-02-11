@@ -123,6 +123,20 @@ func buildExiftoolArgs(jsonPath string, outMediaPath string, includeCreateDate b
 		"-FileModifyDate<PhotoTakenTimeTimestamp",
 	}
 
+	if isHEIFContainer(outMediaPath) {
+		// HEIC/HEIF consumers (e.g. Apple Photos) often read container-level tags
+		// instead of EXIF AllDates, so write both sets.
+		args = append(args,
+			"-QuickTime:CreateDate<PhotoTakenTimeTimestamp",
+			"-QuickTime:ModifyDate<PhotoTakenTimeTimestamp",
+			"-QuickTime:TrackCreateDate<PhotoTakenTimeTimestamp",
+			"-QuickTime:TrackModifyDate<PhotoTakenTimeTimestamp",
+			"-QuickTime:MediaCreateDate<PhotoTakenTimeTimestamp",
+			"-QuickTime:MediaModifyDate<PhotoTakenTimeTimestamp",
+			"-Keys:CreationDate<PhotoTakenTimeTimestamp",
+		)
+	}
+
 	if includeCreateDate {
 		args = append(args, "-FileCreateDate<PhotoTakenTimeTimestamp")
 	}
@@ -152,4 +166,13 @@ func hasSupportedExtension(path string) bool {
 		}
 	}
 	return false
+}
+
+func isHEIFContainer(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".heic", ".heif":
+		return true
+	default:
+		return false
+	}
 }

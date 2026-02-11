@@ -17,6 +17,7 @@ func TestAreExtensionsCompatible(t *testing.T) {
 	}{
 		{".jpg", ".jpeg", true},
 		{".mov", ".mp4", true},
+		{".heic", ".heif", true},
 		{".PNG", ".png", true},
 		{".jpg", ".png", false},
 	}
