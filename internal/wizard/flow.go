@@ -281,7 +281,7 @@ func resolveNoZipProcessRoot(cwd string, extractedRoot string) (string, string, 
 	}
 
 	if !os.IsNotExist(err) {
-		return "", "", false, fmt.Errorf("access extracted data path: %w", err)
+		return "", "", false, fmt.Errorf("access extracted data path %q: %w", extractedRoot, err)
 	}
 
 	processable, detectErr := hasTakeoutContent(cwd)

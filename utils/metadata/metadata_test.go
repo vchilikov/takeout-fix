@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHasSupportedExtension(t *testing.T) {
@@ -418,6 +419,20 @@ func TestApplyFilenameDate_ParsesFromMediaPath(t *testing.T) {
 	}
 	if warned {
 		t.Fatalf("expected warned=false")
+	}
+}
+
+func TestParseFilenameDate_AssumesUTC(t *testing.T) {
+	parsed, ok := parseFilenameDate("2013-06-11 16.19.16.jpg")
+	if !ok {
+		t.Fatalf("expected parse success")
+	}
+	if parsed.Location() != time.UTC {
+		t.Fatalf("expected UTC location, got %v", parsed.Location())
+	}
+	want := time.Date(2013, 6, 11, 16, 19, 16, 0, time.UTC)
+	if !parsed.Equal(want) {
+		t.Fatalf("unexpected parsed value: got %v, want %v", parsed, want)
 	}
 }
 

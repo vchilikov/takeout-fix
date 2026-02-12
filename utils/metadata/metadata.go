@@ -100,7 +100,7 @@ func buildExiftoolArgs(jsonPath string, outMediaPath string, includeCreateDate b
 	return buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, true)
 }
 
-func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeCreateDate bool, includeDateTags bool) []string {
+func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeCreateDate bool, includeJSONDateTags bool) []string {
 	args := []string{
 		"-d", "%s",
 		"-m",
@@ -125,12 +125,12 @@ func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeC
 		"-GPSLongitudeRef<GeoDataExifLongitude",
 	}
 
-	if includeDateTags {
+	if includeJSONDateTags {
 		args = append(args, "-AllDates<PhotoTakenTimeTimestamp")
 		args = append(args, "-FileModifyDate<PhotoTakenTimeTimestamp")
 	}
 
-	if includeDateTags && isHEIFContainer(outMediaPath) {
+	if includeJSONDateTags && isHEIFContainer(outMediaPath) {
 		// HEIC/HEIF consumers (e.g. Apple Photos) often read container-level tags
 		// instead of EXIF AllDates, so write both sets.
 		args = append(args,
@@ -144,7 +144,7 @@ func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeC
 		)
 	}
 
-	if includeDateTags && includeCreateDate {
+	if includeJSONDateTags && includeCreateDate {
 		args = append(args, "-FileCreateDate<PhotoTakenTimeTimestamp")
 	}
 
@@ -161,15 +161,15 @@ func applyJSONMetadata(
 	jsonPath string,
 	outMediaPath string,
 	includeCreateDate bool,
-	includeDateTags bool,
+	includeJSONDateTags bool,
 	run func(args []string) (string, error),
 ) (bool, error) {
-	args := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeDateTags)
+	args := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeJSONDateTags)
 	output, err := run(args)
 	if err != nil {
-		if includeDateTags && includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
+		if includeJSONDateTags && includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
 			// Some filesystems and formats may not support FileCreateDate writes.
-			retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeDateTags)
+			retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeJSONDateTags)
 			retryOutput, retryErr := run(retryArgs)
 			if retryErr == nil {
 				return true, nil
@@ -183,13 +183,13 @@ func applyJSONMetadata(
 		if looksLikeCorruptExif(output) {
 			stripArgs := []string{"-all=", "-overwrite_original", patharg.Safe(outMediaPath)}
 			if _, stripErr := run(stripArgs); stripErr == nil {
-				retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeDateTags)
+				retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeJSONDateTags)
 				retryOutput, retryErr := run(retryArgs)
 				if retryErr == nil {
 					return false, nil
 				}
-				if includeDateTags && includeCreateDate && strings.Contains(strings.ToLower(retryOutput), "filecreatedate") {
-					fallbackArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeDateTags)
+				if includeJSONDateTags && includeCreateDate && strings.Contains(strings.ToLower(retryOutput), "filecreatedate") {
+					fallbackArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeJSONDateTags)
 					fallbackOutput, fallbackErr := run(fallbackArgs)
 					if fallbackErr == nil {
 						return true, nil
@@ -274,7 +274,8 @@ func parseFilenameDate(mediaPath string) (time.Time, bool) {
 	if len(match) != 2 {
 		return time.Time{}, false
 	}
-	parsed, err := time.Parse("2006-01-02 15.04.05", match[1])
+	// Filenames do not encode timezone, so fallback parsing assumes UTC.
+	parsed, err := time.ParseInLocation("2006-01-02 15.04.05", match[1], time.UTC)
 	if err != nil {
 		return time.Time{}, false
 	}

@@ -39,8 +39,5 @@ func HasProcessableTakeout(path string) (bool, error) {
 	if errors.Is(err, errFoundMedia) {
 		return true, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return false, nil
+	return false, err
 }

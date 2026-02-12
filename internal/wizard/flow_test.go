@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/vchilikov/takeout-fix/internal/preflight"
@@ -533,6 +534,23 @@ func TestRunFailsWhenNoZipsAndNoExtractedDir(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("No ZIP archives found and no extracted data.")) {
 		t.Fatalf("expected no-data message, got:\n%s", out.String())
+	}
+}
+
+func TestResolveNoZipProcessRoot_StatErrorIncludesPath(t *testing.T) {
+	restore := stubWizardDeps()
+	defer restore()
+
+	extractedRoot := "\x00takeoutfix-extracted"
+	_, _, preflightFail, err := resolveNoZipProcessRoot(t.TempDir(), extractedRoot)
+	if err == nil {
+		t.Fatalf("expected stat error")
+	}
+	if preflightFail {
+		t.Fatalf("expected runtime path, got preflight fail")
+	}
+	if !strings.Contains(err.Error(), `access extracted data path "\x00takeoutfix-extracted":`) {
+		t.Fatalf("expected error to include quoted path, got: %v", err)
 	}
 }
 
