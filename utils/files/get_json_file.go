@@ -88,18 +88,6 @@ func getJsonFile(mediaFile string, jsonFiles map[string]struct{}, mediaFiles map
 	return "", fmt.Errorf("json file not found for %s", mediaFile)
 }
 
-func findJSONByStem(stem string, jsonFiles map[string]struct{}) (string, bool) {
-	if jsonFile, ok := findJSONCaseInsensitive(stem+".json", jsonFiles); ok {
-		return jsonFile, true
-	}
-
-	matches := findSupplementalJSONByStem(stem, jsonFiles)
-	if len(matches) != 1 {
-		return "", false
-	}
-	return matches[0], true
-}
-
 func findJSONByStemForMedia(mediaFile string, stem string, jsonFiles map[string]struct{}) (string, bool) {
 	if jsonFile, ok := findJSONCaseInsensitive(stem+".json", jsonFiles); ok {
 		return jsonFile, true
@@ -147,14 +135,6 @@ func findJSONCaseInsensitive(name string, jsonFiles map[string]struct{}) (string
 		}
 	}
 	return "", false
-}
-
-func findJSONByBasename(mediaFile string, jsonFiles map[string]struct{}, stripRandomSuffix bool) (string, bool) {
-	matches := findJSONCandidatesByBasename(mediaFile, jsonFiles, stripRandomSuffix)
-	if len(matches) != 1 {
-		return "", false
-	}
-	return matches[0], true
 }
 
 func findJSONByBasenameForMedia(mediaFile string, jsonFiles map[string]struct{}, stripRandomSuffix bool) (string, bool) {
@@ -217,11 +197,6 @@ func filterCandidatesByDuplicateIndex(mediaFile string, candidates []string) []s
 	return filtered
 }
 
-func extractMediaDuplicateIndex(mediaFile string) int {
-	index, _ := extractMediaDuplicateIndexInfo(mediaFile)
-	return index
-}
-
 func extractMediaDuplicateIndexInfo(mediaFile string) (int, bool) {
 	name := filepath.Base(mediaFile)
 	ext := filepath.Ext(name)
@@ -231,11 +206,6 @@ func extractMediaDuplicateIndexInfo(mediaFile string) (int, bool) {
 	return extractTrailingDuplicateIndexInfo(name)
 }
 
-func extractJSONDuplicateIndex(jsonFile string) int {
-	index, _ := extractJSONDuplicateIndexInfo(jsonFile)
-	return index
-}
-
 func extractJSONDuplicateIndexInfo(jsonFile string) (int, bool) {
 	name := filepath.Base(jsonFile)
 	ext := filepath.Ext(name)
@@ -243,11 +213,6 @@ func extractJSONDuplicateIndexInfo(jsonFile string) (int, bool) {
 		name = strings.TrimSuffix(name, ext)
 	}
 	return extractTrailingDuplicateIndexInfo(name)
-}
-
-func extractTrailingDuplicateIndex(name string) int {
-	index, _ := extractTrailingDuplicateIndexInfo(name)
-	return index
 }
 
 func extractTrailingDuplicateIndexInfo(name string) (int, bool) {

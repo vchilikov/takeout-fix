@@ -165,6 +165,8 @@ func ScanTakeout(rootPath string) (MediaScanResult, error) {
 					continue
 				}
 			}
+			// Defensive guard: candidates are precomputed before assignment, so keep
+			// this check to avoid double-claiming if future rule changes reintroduce overlaps.
 			if _, alreadyUsed := usedJSON[candidate]; alreadyUsed {
 				result.AmbiguousJSON[mediaRel] = candidates
 				continue
@@ -214,7 +216,7 @@ func applyGlobalCandidateRules(mediaRel string, candidates []string) []string {
 		return candidates
 	}
 
-	filteredByIndex := filterCandidatesByDuplicateIndex(filepath.Base(mediaRel), candidates)
+	filteredByIndex := filterCandidatesByDuplicateIndex(mediaRel, candidates)
 	if len(filteredByIndex) == 1 {
 		return filteredByIndex
 	}
@@ -242,7 +244,6 @@ func filterCandidatesBySameDir(mediaRel string, candidates []string) []string {
 			filtered = append(filtered, candidate)
 		}
 	}
-	sort.Strings(filtered)
 	return filtered
 }
 
