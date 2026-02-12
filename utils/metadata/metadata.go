@@ -285,6 +285,7 @@ func buildFilenameDateArgs(outMediaPath string, value time.Time, includeCreateDa
 	formatted := value.Format("2006:01:02 15:04:05")
 
 	args := []string{
+		"-m",
 		"-DateTimeOriginal=" + formatted,
 		"-CreateDate=" + formatted,
 		"-ModifyDate=" + formatted,

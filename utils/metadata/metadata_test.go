@@ -401,6 +401,9 @@ func TestApplyFilenameDate_ReturnsUsedFalseOnError(t *testing.T) {
 
 func TestApplyFilenameDate_ParsesFromMediaPath(t *testing.T) {
 	runner := func(args []string) (string, error) {
+		if !slices.Contains(args, "-m") {
+			t.Fatalf("expected -m in filename-date args, got: %v", args)
+		}
 		if !slices.Contains(args, "-DateTimeOriginal=2024:01:15 12:30:00") {
 			t.Fatalf("expected parsed date from mediaPath, got args: %v", args)
 		}
@@ -419,6 +422,46 @@ func TestApplyFilenameDate_ParsesFromMediaPath(t *testing.T) {
 	}
 	if warned {
 		t.Fatalf("expected warned=false")
+	}
+}
+
+func TestApplyFilenameDate_FileCreateDateRetryKeepsMinorWarningMode(t *testing.T) {
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		if !slices.Contains(args, "-m") {
+			t.Fatalf("expected -m in call %d, args: %v", calls, args)
+		}
+		switch calls {
+		case 1:
+			if !slices.Contains(args, "-FileCreateDate=2024:01:15 12:30:00") {
+				t.Fatalf("expected FileCreateDate in first call, args: %v", args)
+			}
+			return "Warning: Sorry, FileCreateDate is not supported\n", fmt.Errorf("exiftool failed")
+		case 2:
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "-FileCreateDate=") {
+					t.Fatalf("did not expect FileCreateDate in retry call, args: %v", args)
+				}
+			}
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.jpg", "out.jpg", true, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !used {
+		t.Fatalf("expected used=true")
+	}
+	if !warned {
+		t.Fatalf("expected warned=true after FileCreateDate retry")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two calls, got %d", calls)
 	}
 }
 
