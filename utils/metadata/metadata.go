@@ -109,6 +109,8 @@ func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeC
 		"-Description<Description",
 		"-ImageDescription<Description",
 		"-Caption-Abstract<Description",
+		// Google Takeout stores Tags as a JSON list. Exiftool maps this list
+		// into list-like target tags such as Keywords/Subject.
 		"-Keywords<Tags",
 		"-Subject<Tags",
 		"-GPSAltitude<GeoDataAltitude",
@@ -209,7 +211,7 @@ func applyFilenameDate(
 	includeCreateDate bool,
 	run func(args []string) (string, error),
 ) (bool, bool, error) {
-	parsed, ok := parseFilenameDate(outMediaPath)
+	parsed, ok := parseFilenameDate(mediaPath)
 	if !ok {
 		return false, false, nil
 	}
@@ -226,10 +228,10 @@ func applyFilenameDate(
 		if retryErr == nil {
 			return true, true, nil
 		}
-		return true, false, fmt.Errorf("could not apply filename date for %s\nerror: %w\noutput: %s", mediaPath, retryErr, retryOutput)
+		return false, false, fmt.Errorf("could not apply filename date for %s\nerror: %w\noutput: %s", mediaPath, retryErr, retryOutput)
 	}
 
-	return true, false, fmt.Errorf("could not apply filename date for %s\nerror: %w\noutput: %s", mediaPath, err, output)
+	return false, false, fmt.Errorf("could not apply filename date for %s\nerror: %w\noutput: %s", mediaPath, err, output)
 }
 
 func buildFilenameDateArgs(outMediaPath string, value time.Time, includeCreateDate bool) []string {
@@ -309,11 +311,18 @@ func detectTimestampStatus(jsonPath string) timestampStatus {
 		if strings.TrimSpace(v) == "" {
 			return timestampStatusMissing
 		}
-		if _, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err != nil {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil {
+			return timestampStatusInvalid
+		}
+		if parsed <= 0 {
 			return timestampStatusInvalid
 		}
 		return timestampStatusValid
 	case float64:
+		if v <= 0 {
+			return timestampStatusInvalid
+		}
 		return timestampStatusValid
 	default:
 		return timestampStatusInvalid

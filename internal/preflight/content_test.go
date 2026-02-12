@@ -2,32 +2,15 @@ package preflight
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/vchilikov/takeout-fix/utils/files"
+	"time"
 )
 
-func TestHasProcessableTakeout_TrueWithMatchedPairs(t *testing.T) {
-	restore := stubContentScanner()
-	defer restore()
-
-	root := t.TempDir()
-	writeFile(t, root, "photo.jpg")
-	writeFile(t, root, "photo.jpg.json")
-
-	ok, err := HasProcessableTakeout(root)
-	if err != nil {
-		t.Fatalf("HasProcessableTakeout error: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected true when matched media/json exists")
-	}
-}
-
-func TestHasProcessableTakeout_TrueWithMissingJSON(t *testing.T) {
-	restore := stubContentScanner()
+func TestHasProcessableTakeout_TrueWhenMediaExists(t *testing.T) {
+	restore := stubContentWalker()
 	defer restore()
 
 	root := t.TempDir()
@@ -38,53 +21,33 @@ func TestHasProcessableTakeout_TrueWithMissingJSON(t *testing.T) {
 		t.Fatalf("HasProcessableTakeout error: %v", err)
 	}
 	if !ok {
-		t.Fatalf("expected true when media exists even without json")
+		t.Fatalf("expected true when media exists")
 	}
 }
 
-func TestHasProcessableTakeout_FalseWhenOnlyUnusedJSON(t *testing.T) {
-	restore := stubContentScanner()
+func TestHasProcessableTakeout_FalseWithoutMedia(t *testing.T) {
+	restore := stubContentWalker()
 	defer restore()
 
 	root := t.TempDir()
 	writeFile(t, root, "orphan.json")
+	writeFile(t, root, "notes.txt")
 
 	ok, err := HasProcessableTakeout(root)
 	if err != nil {
 		t.Fatalf("HasProcessableTakeout error: %v", err)
 	}
 	if ok {
-		t.Fatalf("expected false for folder with only unused json")
+		t.Fatalf("expected false when no supported media exists")
 	}
 }
 
-func TestHasProcessableTakeout_TrueWithAmbiguousMedia(t *testing.T) {
-	restore := stubContentScanner()
+func TestHasProcessableTakeout_PropagatesWalkError(t *testing.T) {
+	restore := stubContentWalker()
 	defer restore()
 
-	scanTakeoutContent = func(string) (files.MediaScanResult, error) {
-		return files.MediaScanResult{
-			AmbiguousJSON: map[string][]string{
-				"IMG_0001.jpg": {"a.json", "b.json"},
-			},
-		}, nil
-	}
-
-	ok, err := HasProcessableTakeout(t.TempDir())
-	if err != nil {
-		t.Fatalf("HasProcessableTakeout error: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected true when ambiguous media exists")
-	}
-}
-
-func TestHasProcessableTakeout_PropagatesScanError(t *testing.T) {
-	restore := stubContentScanner()
-	defer restore()
-
-	scanTakeoutContent = func(string) (files.MediaScanResult, error) {
-		return files.MediaScanResult{}, errors.New("scan failed")
+	walkDirForContent = func(string, fs.WalkDirFunc) error {
+		return errors.New("walk failed")
 	}
 
 	ok, err := HasProcessableTakeout(t.TempDir())
@@ -96,10 +59,36 @@ func TestHasProcessableTakeout_PropagatesScanError(t *testing.T) {
 	}
 }
 
-func stubContentScanner() func() {
-	orig := scanTakeoutContent
+func TestHasProcessableTakeout_StopsOnFirstMedia(t *testing.T) {
+	restore := stubContentWalker()
+	defer restore()
+
+	walkCalls := 0
+	walkDirForContent = func(path string, fn fs.WalkDirFunc) error {
+		walkCalls++
+		err := fn(filepath.Join(path, "photo.jpg"), fakeDirEntry{name: "photo.jpg"}, nil)
+		if !errors.Is(err, errFoundMedia) {
+			t.Fatalf("expected early-exit marker, got %v", err)
+		}
+		return err
+	}
+
+	ok, err := HasProcessableTakeout("/tmp/work")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected true when first walked file is media")
+	}
+	if walkCalls != 1 {
+		t.Fatalf("expected walker call once, got %d", walkCalls)
+	}
+}
+
+func stubContentWalker() func() {
+	orig := walkDirForContent
 	return func() {
-		scanTakeoutContent = orig
+		walkDirForContent = orig
 	}
 }
 
@@ -113,3 +102,23 @@ func writeFile(t *testing.T, root string, rel string) {
 		t.Fatalf("write %s: %v", rel, err)
 	}
 }
+
+type fakeDirEntry struct {
+	name string
+}
+
+func (f fakeDirEntry) Name() string               { return f.name }
+func (f fakeDirEntry) IsDir() bool                { return false }
+func (f fakeDirEntry) Type() fs.FileMode          { return 0 }
+func (f fakeDirEntry) Info() (fs.FileInfo, error) { return fakeFileInfo(f), nil }
+
+type fakeFileInfo struct {
+	name string
+}
+
+func (f fakeFileInfo) Name() string       { return f.name }
+func (f fakeFileInfo) Size() int64        { return 0 }
+func (f fakeFileInfo) Mode() fs.FileMode  { return 0 }
+func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeFileInfo) IsDir() bool        { return false }
+func (f fakeFileInfo) Sys() any           { return nil }

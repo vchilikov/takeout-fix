@@ -345,6 +345,27 @@ func TestDetectTimestampStatus(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid zero string timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"0"}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status for zero string, got %v", got)
+		}
+	})
+
+	t.Run("invalid zero numeric timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":0}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status for zero numeric, got %v", got)
+		}
+	})
+
+	t.Run("valid numeric timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":1}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusValid {
+			t.Fatalf("expected valid status for numeric timestamp, got %v", got)
+		}
+	})
+
 	t.Run("unknown malformed json", func(t *testing.T) {
 		jsonPath := writeJSONFixture(t, `{"photoTakenTime":`)
 		if got := detectTimestampStatus(jsonPath); got != timestampStatusUnknown {
@@ -358,6 +379,46 @@ func TestDetectTimestampStatus(t *testing.T) {
 			t.Fatalf("expected unknown status, got %v", got)
 		}
 	})
+}
+
+func TestApplyFilenameDate_ReturnsUsedFalseOnError(t *testing.T) {
+	runner := func(args []string) (string, error) {
+		return "Error: failed\n", fmt.Errorf("failed")
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.jpg", "out.xmp", false, runner)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if used {
+		t.Fatalf("expected used=false on failure")
+	}
+	if warned {
+		t.Fatalf("expected warned=false on failure")
+	}
+}
+
+func TestApplyFilenameDate_ParsesFromMediaPath(t *testing.T) {
+	runner := func(args []string) (string, error) {
+		if !slices.Contains(args, "-DateTimeOriginal=2024:01:15 12:30:00") {
+			t.Fatalf("expected parsed date from mediaPath, got args: %v", args)
+		}
+		if !slices.Contains(args, "output.xmp") {
+			t.Fatalf("expected writes to outMediaPath, got args: %v", args)
+		}
+		return "1 image files updated\n", nil
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.raw", "output.xmp", false, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !used {
+		t.Fatalf("expected used=true")
+	}
+	if warned {
+		t.Fatalf("expected warned=false")
+	}
 }
 
 func TestApplyDetailedWithRunner_ValidTimestampDoesNotUseFilenameFallback(t *testing.T) {

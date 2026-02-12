@@ -2,10 +2,12 @@ package metadata
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -118,6 +120,60 @@ func TestApplyDetailed_UsesGeoDataExifFallback(t *testing.T) {
 	}
 }
 
+func TestApplyDetailed_WritesTagsToKeywordsAndSubject(t *testing.T) {
+	if _, err := exec.LookPath("exiftool"); err != nil {
+		t.Skip("exiftool not available")
+	}
+
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "file.jpg")
+	jsonPath := filepath.Join(dir, "meta.json")
+
+	decoded, err := base64.StdEncoding.DecodeString(tinyJPEGB64)
+	if err != nil {
+		t.Fatalf("decode tiny jpeg: %v", err)
+	}
+	if err := os.WriteFile(mediaPath, decoded, 0o600); err != nil {
+		t.Fatalf("write media: %v", err)
+	}
+
+	jsonData := `{
+  "photoTakenTime": {"timestamp": "1719835200"},
+  "tags": ["foo", "bar"]
+}`
+	if err := os.WriteFile(jsonPath, []byte(jsonData), 0o600); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+
+	if _, err := ApplyDetailed(mediaPath, jsonPath); err != nil {
+		t.Fatalf("ApplyDetailed error: %v", err)
+	}
+
+	out, err := exec.Command("exiftool", "-j", "-Keywords", "-Subject", "--", mediaPath).Output()
+	if err != nil {
+		t.Fatalf("read tags: %v", err)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(out, &items); err != nil {
+		t.Fatalf("parse exiftool json: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one exiftool item, got %d", len(items))
+	}
+
+	keywords := valuesFromTag(items[0]["Keywords"])
+	subject := valuesFromTag(items[0]["Subject"])
+	for _, want := range []string{"foo", "bar"} {
+		if !slices.Contains(keywords, want) {
+			t.Fatalf("expected keyword %q, got %v", want, keywords)
+		}
+		if !slices.Contains(subject, want) {
+			t.Fatalf("expected subject %q, got %v", want, subject)
+		}
+	}
+}
+
 func statSeconds(t *testing.T, path string) (int64, int64) {
 	t.Helper()
 
@@ -139,4 +195,27 @@ func statSeconds(t *testing.T, path string) (int64, int64) {
 	}
 
 	return modify, birth
+}
+
+func valuesFromTag(value any) []string {
+	var out []string
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+	case string:
+		for _, item := range strings.Split(v, ",") {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
 }
