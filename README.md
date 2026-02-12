@@ -61,12 +61,15 @@ After a successful run:
 
 - Your processed media is ready in `./takeoutfix-extracted/Takeout`.
 - Metadata is applied to supported photos and videos.
+- JSON `Tags` are written to `Keywords` and `Subject`.
+- If the JSON capture timestamp is missing or invalid and the filename starts with `YYYY-MM-DD HH.MM.SS`, the date is restored from the filename.
 - You can upload `./takeoutfix-extracted/Takeout` to your new storage.
 
 ## Common Issues
 
 - `No ZIP archives found in current folder.`
-  - Move all Takeout ZIP parts to the top level of your working folder and run again.
+  - TakeoutFix auto-detects already extracted Takeout content in the working folder.
+  - If this message appears, either place Takeout ZIP parts in the folder root or run from a folder that contains extracted Takeout media.
 - `Corrupt ZIP files found. Processing stopped.`
   - Re-download broken archive parts from Google Takeout, then rerun.
 - `Missing dependencies: exiftool`

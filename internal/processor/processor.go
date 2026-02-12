@@ -34,6 +34,7 @@ type exiftoolSession interface {
 type Summary struct {
 	MediaFound          int
 	MetadataApplied     int
+	FilenameDateApplied int
 	RenamedExtensions   int
 	XMPSidecars         int
 	CreateDateWarnings  int
@@ -187,12 +188,18 @@ func RunWithProgress(rootPath string, onProgress func(ProgressEvent)) (Report, e
 
 			jsonSuccessCount[res.jsonFile]++
 			report.Summary.MetadataApplied++
+			if res.meta.UsedFilenameDate {
+				report.Summary.FilenameDateApplied++
+			}
 			if res.meta.UsedXMPSidecar {
 				report.Summary.XMPSidecars++
 			}
 			if res.meta.CreateDateWarned {
 				report.Summary.CreateDateWarnings++
 				report.addProblem("create date warnings", res.fixResult.Path)
+			}
+			if res.meta.FilenameDateWarned {
+				report.addProblem("filename date warnings", res.fixResult.Path)
 			}
 
 			notifyProgress(onProgress, processed, total, res.mediaFile)

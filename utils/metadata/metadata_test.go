@@ -2,10 +2,13 @@ package metadata
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHasSupportedExtension(t *testing.T) {
@@ -47,6 +50,12 @@ func TestBuildExiftoolArgs_DoesNotIncludeOffsetTags(t *testing.T) {
 	}
 	if !slices.Contains(args, "-GPSLongitude<GeoDataExifLongitude") {
 		t.Fatalf("expected GeoDataExif longitude fallback mapping in args")
+	}
+	if !slices.Contains(args, "-Keywords<Tags") {
+		t.Fatalf("expected Keywords mapping in args")
+	}
+	if !slices.Contains(args, "-Subject<Tags") {
+		t.Fatalf("expected Subject mapping in args")
 	}
 }
 
@@ -115,6 +124,15 @@ func TestBuildExiftoolArgs_GeoDataExifComesAfterGeoData(t *testing.T) {
 	}
 	if geoDataExif <= geoData {
 		t.Fatalf("expected GeoDataExif mapping to be applied after GeoData mapping, got %v", args)
+	}
+}
+
+func TestBuildExiftoolArgsWithOptions_ExcludesDateTagsWhenDisabled(t *testing.T) {
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, false, gpsInclusion{true, true})
+	for _, arg := range args {
+		if strings.Contains(arg, "PhotoTakenTimeTimestamp") {
+			t.Fatalf("did not expect date mapping when disabled, got: %v", args)
+		}
 	}
 }
 
@@ -297,4 +315,439 @@ func TestLooksLikeCorruptExif(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDetectTimestampStatus(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"1719835200"}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusValid {
+			t.Fatalf("expected valid status, got %v", got)
+		}
+	})
+
+	t.Run("missing photoTakenTime", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"title":"x"}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusMissing {
+			t.Fatalf("expected missing status, got %v", got)
+		}
+	})
+
+	t.Run("missing timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusMissing {
+			t.Fatalf("expected missing status, got %v", got)
+		}
+	})
+
+	t.Run("invalid timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"not-a-number"}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status, got %v", got)
+		}
+	})
+
+	t.Run("invalid zero string timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"0"}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status for zero string, got %v", got)
+		}
+	})
+
+	t.Run("invalid negative string timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"-1"}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status for negative string, got %v", got)
+		}
+	})
+
+	t.Run("invalid zero numeric timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":0}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusInvalid {
+			t.Fatalf("expected invalid status for zero numeric, got %v", got)
+		}
+	})
+
+	t.Run("valid numeric timestamp", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":1}}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusValid {
+			t.Fatalf("expected valid status for numeric timestamp, got %v", got)
+		}
+	})
+
+	t.Run("unknown malformed json", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusUnknown {
+			t.Fatalf("expected unknown status, got %v", got)
+		}
+	})
+
+	t.Run("unknown invalid shape", func(t *testing.T) {
+		jsonPath := writeJSONFixture(t, `{"photoTakenTime":"bad-shape"}`)
+		if got := detectTimestampStatus(jsonPath); got != timestampStatusUnknown {
+			t.Fatalf("expected unknown status, got %v", got)
+		}
+	})
+}
+
+func TestApplyFilenameDate_ReturnsUsedFalseOnError(t *testing.T) {
+	runner := func(args []string) (string, error) {
+		return "Error: failed\n", fmt.Errorf("failed")
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.jpg", "out.xmp", false, runner)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if used {
+		t.Fatalf("expected used=false on failure")
+	}
+	if warned {
+		t.Fatalf("expected warned=false on failure")
+	}
+}
+
+func TestApplyFilenameDate_ParsesFromMediaPath(t *testing.T) {
+	runner := func(args []string) (string, error) {
+		if !slices.Contains(args, "-m") {
+			t.Fatalf("expected -m in filename-date args, got: %v", args)
+		}
+		if !slices.Contains(args, "-DateTimeOriginal=2024:01:15 12:30:00") {
+			t.Fatalf("expected parsed date from mediaPath, got args: %v", args)
+		}
+		if !slices.Contains(args, "output.xmp") {
+			t.Fatalf("expected writes to outMediaPath, got args: %v", args)
+		}
+		return "1 image files updated\n", nil
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.raw", "output.xmp", false, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !used {
+		t.Fatalf("expected used=true")
+	}
+	if warned {
+		t.Fatalf("expected warned=false")
+	}
+}
+
+func TestApplyFilenameDate_FileCreateDateRetryKeepsMinorWarningMode(t *testing.T) {
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		if !slices.Contains(args, "-m") {
+			t.Fatalf("expected -m in call %d, args: %v", calls, args)
+		}
+		switch calls {
+		case 1:
+			if !slices.Contains(args, "-FileCreateDate=2024:01:15 12:30:00") {
+				t.Fatalf("expected FileCreateDate in first call, args: %v", args)
+			}
+			return "Warning: Sorry, FileCreateDate is not supported\n", fmt.Errorf("exiftool failed")
+		case 2:
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "-FileCreateDate=") {
+					t.Fatalf("did not expect FileCreateDate in retry call, args: %v", args)
+				}
+			}
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	used, warned, err := applyFilenameDate("2024-01-15 12.30.00.jpg", "out.jpg", true, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !used {
+		t.Fatalf("expected used=true")
+	}
+	if !warned {
+		t.Fatalf("expected warned=true after FileCreateDate retry")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two calls, got %d", calls)
+	}
+}
+
+func TestParseFilenameDate_AssumesUTC(t *testing.T) {
+	parsed, ok := parseFilenameDate("2013-06-11 16.19.16.jpg")
+	if !ok {
+		t.Fatalf("expected parse success")
+	}
+	if parsed.Location() != time.UTC {
+		t.Fatalf("expected UTC location, got %v", parsed.Location())
+	}
+	want := time.Date(2013, 6, 11, 16, 19, 16, 0, time.UTC)
+	if !parsed.Equal(want) {
+		t.Fatalf("unexpected parsed value: got %v, want %v", parsed, want)
+	}
+}
+
+func TestApplyDetailedWithRunner_ValidTimestampDoesNotUseFilenameFallback(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"1719835200"}}`)
+	callCount := 0
+	runner := func(args []string) (string, error) {
+		callCount++
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "-DateTimeOriginal=") {
+				t.Fatalf("did not expect filename date assignment for valid JSON timestamp, args: %v", args)
+			}
+		}
+		return "1 image files updated\n", nil
+	}
+
+	result, err := ApplyDetailedWithRunner("2013-06-11 16.19.16.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=false for valid timestamp")
+	}
+	if callCount != 1 {
+		t.Fatalf("expected one exiftool call, got %d", callCount)
+	}
+}
+
+func TestApplyDetailedWithRunner_MissingTimestampUsesFilenameFallback(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"title":"x"}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if slices.Contains(args, "-AllDates<PhotoTakenTimeTimestamp") {
+				t.Fatalf("did not expect JSON date mapping when timestamp is missing, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		case 2:
+			if !slices.Contains(args, "-DateTimeOriginal=2013:06:11 16:19:16") {
+				t.Fatalf("expected filename date assignment, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("2013-06-11 16.19.16.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=true")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two exiftool calls, got %d", calls)
+	}
+}
+
+func TestApplyDetailedWithRunner_InvalidTimestampUsesFilenameFallback(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"not-a-number"}}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if slices.Contains(args, "-AllDates<PhotoTakenTimeTimestamp") {
+				t.Fatalf("did not expect JSON date mapping when timestamp is invalid, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		case 2:
+			if !slices.Contains(args, "-DateTimeOriginal=2013:06:11 16:19:16") {
+				t.Fatalf("expected filename date assignment, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("2013-06-11 16.19.16.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=true")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two exiftool calls, got %d", calls)
+	}
+}
+
+func TestApplyDetailedWithRunner_MissingTimestampFilenameFallbackFailureIsWarning(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"title":"x"}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if slices.Contains(args, "-AllDates<PhotoTakenTimeTimestamp") {
+				t.Fatalf("did not expect JSON date mapping when timestamp is missing, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		case 2:
+			if !slices.Contains(args, "-DateTimeOriginal=2013:06:11 16:19:16") {
+				t.Fatalf("expected filename date assignment, args: %v", args)
+			}
+			return "Error: failed to write DateTimeOriginal\n", fmt.Errorf("exiftool failed")
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("2013-06-11 16.19.16.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=false when fallback fails")
+	}
+	if !result.FilenameDateWarned {
+		t.Fatalf("expected FilenameDateWarned=true when fallback fails")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two exiftool calls, got %d", calls)
+	}
+}
+
+func TestApplyDetailedWithRunner_MissingTimestampUnparseableFilenameSkipsFallback(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"title":"x"}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		if calls > 1 {
+			t.Fatalf("did not expect fallback call for unparseable filename, args: %v", args)
+		}
+		return "1 image files updated\n", nil
+	}
+
+	result, err := ApplyDetailedWithRunner("IMG_1234.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=false")
+	}
+	if calls != 1 {
+		t.Fatalf("expected one exiftool call, got %d", calls)
+	}
+}
+
+func TestDetectGPSInclusion_BothZero(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"geoData":{"latitude":0.0,"longitude":0.0},"geoDataExif":{"latitude":0.0,"longitude":0.0}}`)
+	gps := detectGPSInclusion(jsonPath)
+	if gps.geoData {
+		t.Fatalf("expected geoData=false for zero coords")
+	}
+	if gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=false for zero coords")
+	}
+}
+
+func TestDetectGPSInclusion_GeoDataValid(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"geoData":{"latitude":55.7,"longitude":37.5},"geoDataExif":{"latitude":0.0,"longitude":0.0}}`)
+	gps := detectGPSInclusion(jsonPath)
+	if !gps.geoData {
+		t.Fatalf("expected geoData=true for valid coords")
+	}
+	if gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=false for zero coords")
+	}
+}
+
+func TestDetectGPSInclusion_GeoDataZeroExifValid(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"geoData":{"latitude":0.0,"longitude":0.0},"geoDataExif":{"latitude":48.8,"longitude":2.3}}`)
+	gps := detectGPSInclusion(jsonPath)
+	if gps.geoData {
+		t.Fatalf("expected geoData=false for zero coords")
+	}
+	if !gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=true for valid coords")
+	}
+}
+
+func TestDetectGPSInclusion_BothValid(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"geoData":{"latitude":55.7,"longitude":37.5},"geoDataExif":{"latitude":48.8,"longitude":2.3}}`)
+	gps := detectGPSInclusion(jsonPath)
+	if !gps.geoData {
+		t.Fatalf("expected geoData=true for valid coords")
+	}
+	if !gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=true for valid coords")
+	}
+}
+
+func TestDetectGPSInclusion_NullCoords(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"geoDataExif":{"latitude":null,"longitude":null}}`)
+	gps := detectGPSInclusion(jsonPath)
+	if gps.geoData {
+		t.Fatalf("expected geoData=false for missing field")
+	}
+	if gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=false for null coords")
+	}
+}
+
+func TestDetectGPSInclusion_MissingFields(t *testing.T) {
+	jsonPath := writeJSONFixture(t, `{"title":"no geo at all"}`)
+	gps := detectGPSInclusion(jsonPath)
+	if gps.geoData {
+		t.Fatalf("expected geoData=false when field is missing")
+	}
+	if gps.geoDataExif {
+		t.Fatalf("expected geoDataExif=false when field is missing")
+	}
+}
+
+func TestDetectGPSInclusion_UnreadableFile(t *testing.T) {
+	gps := detectGPSInclusion("/nonexistent/path/meta.json")
+	if !gps.geoData || !gps.geoDataExif {
+		t.Fatalf("expected fail-open (both true) for unreadable file, got geoData=%v geoDataExif=%v", gps.geoData, gps.geoDataExif)
+	}
+}
+
+func TestBuildExiftoolArgs_ExcludesGeoDataGPSWhenZero(t *testing.T) {
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, gpsInclusion{false, true})
+
+	for _, arg := range args {
+		if strings.Contains(arg, "GeoDataLatitude") && !strings.Contains(arg, "GeoDataExif") {
+			t.Fatalf("did not expect GeoData (non-Exif) GPS args, got: %v", args)
+		}
+	}
+	if !slices.Contains(args, "-GPSLatitude<GeoDataExifLatitude") {
+		t.Fatalf("expected GeoDataExif latitude mapping, got: %v", args)
+	}
+	if !slices.Contains(args, "-GPSLongitude<GeoDataExifLongitude") {
+		t.Fatalf("expected GeoDataExif longitude mapping, got: %v", args)
+	}
+}
+
+func TestBuildExiftoolArgs_ExcludesAllGPSWhenBothZero(t *testing.T) {
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, gpsInclusion{false, false})
+
+	for _, arg := range args {
+		if strings.Contains(arg, "GPS") {
+			t.Fatalf("did not expect any GPS args when both are zero, got: %v", args)
+		}
+	}
+	// Non-GPS tags should still be present.
+	if !slices.Contains(args, "-Title<Title") {
+		t.Fatalf("expected Title mapping even when GPS excluded, got: %v", args)
+	}
+	if !slices.Contains(args, "-Keywords<Tags") {
+		t.Fatalf("expected Keywords mapping even when GPS excluded, got: %v", args)
+	}
+}
+
+func writeJSONFixture(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "meta.json")
+	if err := os.WriteFile(jsonPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write json fixture: %v", err)
+	}
+	return jsonPath
 }

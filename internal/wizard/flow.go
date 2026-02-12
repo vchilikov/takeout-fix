@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ var (
 	discoverZips       = preflight.DiscoverTopLevelZips
 	validateAll        = preflight.ValidateAll
 	checkDiskSpace     = preflight.CheckDiskSpace
+	detectTakeoutRoot  = preflight.DetectProcessableTakeoutRoot
 	loadState          = state.Load
 	saveState          = state.Save
 	shouldSkip         = state.ShouldSkipExtraction
@@ -78,20 +80,16 @@ func Run(cwd string, out io.Writer) int {
 	}
 	report.ArchiveFound = len(zips)
 	if len(zips) == 0 {
-		info, err := os.Stat(dest)
+		processRoot, message, preflightFail, err := resolveNoZipProcessRoot(cwd, dest)
 		if err != nil {
-			if os.IsNotExist(err) {
-				writeLine(out, "No ZIP archives found and no extracted data.")
-				return finish(ExitPreflightFail)
-			}
-			report.addProblem("extracted data access error", 1, err.Error())
+			report.addProblem("takeout content detection errors", 1, err.Error())
 			return finish(ExitRuntimeFail)
 		}
-		if !info.IsDir() {
-			writeLine(out, "No ZIP archives found and extracted data path is not a directory.")
+		writeLine(out, message)
+		if preflightFail {
 			return finish(ExitPreflightFail)
 		}
-		writeLine(out, "No ZIP archives found. Re-processing previously extracted data...")
+		dest = processRoot
 	}
 
 	if len(zips) > 0 {
@@ -232,6 +230,7 @@ func Run(cwd string, out io.Writer) int {
 
 	report.MediaFound = procReport.Summary.MediaFound
 	report.MetadataApplied = procReport.Summary.MetadataApplied
+	report.FilenameDateApplied = procReport.Summary.FilenameDateApplied
 	report.RenamedExtensions = procReport.Summary.RenamedExtensions
 	report.XMPSidecars = procReport.Summary.XMPSidecars
 	report.CreateDateWarnings = procReport.Summary.CreateDateWarnings
@@ -270,6 +269,30 @@ func Run(cwd string, out io.Writer) int {
 
 	report.Status = "SUCCESS"
 	return finish(ExitSuccess)
+}
+
+func resolveNoZipProcessRoot(cwd string, extractedRoot string) (string, string, bool, error) {
+	info, err := os.Stat(extractedRoot)
+	if err == nil {
+		if !info.IsDir() {
+			return "", "No ZIP archives found and extracted data path is not a directory.", true, nil
+		}
+		return extractedRoot, "No ZIP archives found. Re-processing previously extracted data...", false, nil
+	}
+
+	if !os.IsNotExist(err) {
+		return "", "", false, fmt.Errorf("access extracted data path %q: %w", extractedRoot, err)
+	}
+
+	processRoot, processable, detectErr := detectTakeoutRoot(cwd)
+	if detectErr != nil {
+		return "", "", false, fmt.Errorf("detect extracted takeout content: %w", detectErr)
+	}
+	if !processable {
+		return "", "No ZIP archives found and no extracted data.", true, nil
+	}
+
+	return processRoot, fmt.Sprintf("No ZIP archives found. Processing existing Takeout content from: %s", processRoot), false, nil
 }
 
 func progressPercent(done int, total int) int {
