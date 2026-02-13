@@ -72,7 +72,7 @@ Windows (PowerShell):
   - 请将所有 Takeout ZIP 分卷放到工作目录顶层，或在已包含解压后 Takeout 内容的目录中运行工具。
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - 请在 Google Takeout 重新下载损坏的分卷后重试。
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - 请先使用上方推荐的一键命令，或手动安装 `exiftool` 后再运行。
 - `Not enough free disk space to continue.`
   - 请释放更多磁盘空间后重试。

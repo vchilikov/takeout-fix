@@ -72,7 +72,7 @@ After a successful run:
   - Place Takeout ZIP parts in the folder root, or run from a folder that already contains extracted Takeout content.
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - Re-download broken archive parts from Google Takeout, then rerun.
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - Use the recommended one-liner command above, or install `exiftool` manually and rerun.
 - `Not enough free disk space to continue.`
   - Free up disk space and rerun.

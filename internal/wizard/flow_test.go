@@ -1035,6 +1035,7 @@ func stubWizardDeps() func() {
 	origProcessTakeout := processTakeout
 	origRemoveFile := removeFile
 	origDetectTakeoutRoot := detectTakeoutRoot
+	origWriteReportJSON := writeReportJSON
 
 	return func() {
 		checkDependencies = origCheckDependencies
@@ -1048,5 +1049,6 @@ func stubWizardDeps() func() {
 		processTakeout = origProcessTakeout
 		removeFile = origRemoveFile
 		detectTakeoutRoot = origDetectTakeoutRoot
+		writeReportJSON = origWriteReportJSON
 	}
 }

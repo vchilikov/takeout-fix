@@ -32,10 +32,10 @@ type jsonReport struct {
 }
 
 type jsonArchives struct {
-	Found   int      `json:"found"`
-	Valid   int      `json:"valid"`
-	Corrupt int      `json:"corrupt"`
-	Names   []string `json:"names,omitempty"`
+	Found        int      `json:"found"`
+	Valid        int      `json:"valid"`
+	Corrupt      int      `json:"corrupt"`
+	CorruptNames []string `json:"corrupt_names,omitempty"`
 }
 
 type jsonDisk struct {
@@ -80,7 +80,7 @@ type jsonTimingsMS struct {
 	Total       int64 `json:"total"`
 }
 
-func writeReportJSON(workdir string, report Report) (string, error) {
+func writeReportJSONImpl(workdir string, report Report) (string, error) {
 	reportDir := filepath.Join(workdir, ".takeoutfix", "reports")
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
 		return "", fmt.Errorf("create report directory: %w", err)
@@ -134,10 +134,10 @@ func buildJSONReport(report Report) jsonReport {
 		FinishedAtLocal: report.FinishedAtLocal.Format(time.RFC3339Nano),
 		DurationMS:      report.TotalDuration.Milliseconds(),
 		Archives: jsonArchives{
-			Found:   report.ArchiveFound,
-			Valid:   report.ArchiveValid,
-			Corrupt: report.ArchiveCorrupt,
-			Names:   append([]string(nil), report.CorruptNames...),
+			Found:        report.ArchiveFound,
+			Valid:        report.ArchiveValid,
+			Corrupt:      report.ArchiveCorrupt,
+			CorruptNames: append([]string(nil), report.CorruptNames...),
 		},
 		Disk: jsonDisk{
 			AvailableBytes:          report.Disk.AvailableBytes,

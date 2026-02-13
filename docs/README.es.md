@@ -72,7 +72,7 @@ Después de una ejecución correcta:
   - Coloca todas las partes ZIP de Takeout en el nivel superior de la carpeta o ejecuta la herramienta desde una carpeta con contenido de Takeout ya extraído.
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - Vuelve a descargar las partes dañadas desde Google Takeout y reintenta.
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - Usa el comando one-liner recomendado arriba, o instala `exiftool` manualmente.
 - `Not enough free disk space to continue.`
   - Libera espacio en disco y vuelve a ejecutar.

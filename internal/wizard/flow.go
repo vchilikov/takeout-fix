@@ -35,6 +35,7 @@ var (
 	extractArchiveFile = extract.ExtractArchive
 	processTakeout     = processor.RunWithProgress
 	removeFile         = os.Remove
+	writeReportJSON    = writeReportJSONImpl
 )
 
 func Run(cwd string, out io.Writer) int {
@@ -70,7 +71,7 @@ func Run(cwd string, out io.Writer) int {
 	writef(out, "Folder: %s\n", report.Workdir)
 	writeLine(out, "")
 
-	writef(out, "Step 1/4: Checking dependencies... ")
+	writef(out, "Step 1/3: Checking dependencies... ")
 	missing := checkDependencies()
 	if len(missing) > 0 {
 		writeLine(out, "missing")
@@ -91,7 +92,7 @@ func Run(cwd string, out io.Writer) int {
 	lowSpaceDelete := false
 	deferredDelete := make([]preflight.ZipArchive, 0)
 
-	writef(out, "Step 2/4: Looking for ZIP files... ")
+	writef(out, "Step 2/3: Looking for ZIP files... ")
 	zipScanStartedAt := time.Now()
 	zips, err := discoverZips(report.Workdir)
 	report.ZipScanDuration = time.Since(zipScanStartedAt)
@@ -219,7 +220,7 @@ func Run(cwd string, out io.Writer) int {
 		writeLine(out, "Preparing files from ZIP archives... done")
 	}
 
-	writeLine(out, "Step 3/4: Applying metadata...")
+	writeLine(out, "Step 3/3: Applying metadata and cleaning JSON...")
 	writeLine(out, "Progress: 0%")
 	processStartedAt := time.Now()
 	lastProcessBucket := 0
@@ -235,14 +236,12 @@ func Run(cwd string, out io.Writer) int {
 	if err != nil {
 		report.addProblem("processing errors", 1, err.Error())
 		report.ProcessDuration = time.Since(processStartedAt)
-		writeLine(out, "Step 4/4: Cleaning JSON sidecars... skipped")
 		return finish(ExitRuntimeFail)
 	}
 	report.ProcessDuration = time.Since(processStartedAt)
 	if sawProcessEvent && lastProcessBucket < 100 {
 		writeLine(out, "Progress: 100%")
 	}
-	writeLine(out, "Step 4/4: Cleaning JSON sidecars... done")
 
 	report.MediaFound = procReport.Summary.MediaFound
 	report.MetadataApplied = procReport.Summary.MetadataApplied

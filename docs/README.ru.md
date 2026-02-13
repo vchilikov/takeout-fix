@@ -72,7 +72,7 @@ Windows (PowerShell):
   - Положите ZIP-части Takeout в корень папки или запускайте утилиту в папке с уже распакованным контентом.
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - Скачайте поврежденные части архива заново в Google Takeout и повторите запуск.
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - Используйте рекомендованную one-liner команду выше или установите `exiftool` вручную.
 - `Not enough free disk space to continue.`
   - Освободите место на диске и запустите повторно.

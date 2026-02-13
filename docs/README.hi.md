@@ -72,7 +72,7 @@ Windows (PowerShell):
   - सभी Takeout ZIP parts को working folder के top level में रखें, या tool को उस folder से चलाएं जहां extracted Takeout content मौजूद हो।
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - Google Takeout से खराब archive parts दोबारा डाउनलोड करें और rerun करें।
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - ऊपर दिया recommended one-liner command चलाएं, या `exiftool` manually install करें।
 - `Not enough free disk space to continue.`
   - डिस्क में space खाली करें और दोबारा चलाएं।

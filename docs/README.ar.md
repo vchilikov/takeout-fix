@@ -72,7 +72,7 @@ Windows (PowerShell):
   - انقل كل أجزاء ZIP الخاصة بـ Takeout إلى المستوى الأعلى من مجلد العمل، أو شغّل الأداة من مجلد يحتوي مسبقا على محتوى Takeout المفكوك.
 - `Some ZIP files are corrupted. Please re-download them and run again.`
   - أعد تنزيل الأجزاء التالفة من Google Takeout ثم أعد التشغيل.
-- `Step 1/4: Checking dependencies... missing`
+- `Step 1/3: Checking dependencies... missing`
   - استخدم أمر التشغيل الموصى به أعلاه أو ثبّت `exiftool` يدويا.
 - `Not enough free disk space to continue.`
   - وفر مساحة إضافية على القرص ثم أعد التشغيل.
