@@ -201,6 +201,9 @@ func RunWithProgress(rootPath string, onProgress func(ProgressEvent)) (Report, e
 			if res.meta.FilenameDateWarned {
 				report.addProblem("filename date warnings", res.fixResult.Path)
 			}
+			if res.meta.MediaFileDateWarned {
+				report.addProblem("media file date warnings", res.fixResult.Path)
+			}
 
 			notifyProgress(onProgress, processed, total, res.mediaFile)
 		}
