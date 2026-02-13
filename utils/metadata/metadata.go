@@ -18,10 +18,11 @@ import (
 )
 
 type ApplyResult struct {
-	UsedFilenameDate   bool
-	UsedXMPSidecar     bool
-	CreateDateWarned   bool
-	FilenameDateWarned bool
+	UsedFilenameDate    bool
+	UsedXMPSidecar      bool
+	CreateDateWarned    bool
+	FilenameDateWarned  bool
+	MediaFileDateWarned bool
 }
 
 type timestampStatus int
@@ -91,32 +92,58 @@ func ApplyDetailedWithRunner(
 		return result, fmt.Errorf("nil exiftool runner")
 	}
 
-	var outMediaPath string
-	if hasSupportedExtension(mediaPath) {
-		outMediaPath = mediaPath
-	} else {
-		outMediaPath = mediaPath + ".xmp"
-		result.UsedXMPSidecar = true
-	}
+	metadataPath, mediaDatePath, useXMPSidecar := resolveWriteTargets(mediaPath)
+	result.UsedXMPSidecar = useXMPSidecar
 
 	includeCreateDate := shouldWriteFileCreateDate()
 	status := detectTimestampStatus(jsonPath)
 	includeJSONDate := status == timestampStatusValid || status == timestampStatusUnknown
 
-	createDateWarned, err := applyJSONMetadata(mediaPath, jsonPath, outMediaPath, includeCreateDate, includeJSONDate, run)
+	createDateWarned, err := applyJSONMetadata(
+		mediaPath,
+		jsonPath,
+		metadataPath,
+		includeCreateDate,
+		includeJSONDate,
+		!useXMPSidecar,
+		run,
+	)
 	if err != nil {
 		return result, err
 	}
 	result.CreateDateWarned = createDateWarned
 
+	if useXMPSidecar && includeJSONDate {
+		fileDateCreateWarned, fileDateErr := applyMediaFileDatesFromJSON(mediaDatePath, jsonPath, includeCreateDate, run)
+		if fileDateCreateWarned {
+			result.CreateDateWarned = true
+		}
+		if fileDateErr != nil {
+			result.MediaFileDateWarned = true
+		}
+	}
+
 	if status == timestampStatusMissing || status == timestampStatusInvalid {
-		usedFilenameDate, filenameCreateDateWarned, err := applyFilenameDate(mediaPath, outMediaPath, includeCreateDate, run)
-		if err != nil {
-			result.FilenameDateWarned = true
+		if useXMPSidecar {
+			usedFilenameDate, filenameCreateDateWarned, fileDateErr := applyMediaFileDatesFromFilename(mediaDatePath, includeCreateDate, run)
+			if fileDateErr != nil {
+				result.FilenameDateWarned = true
+				result.MediaFileDateWarned = true
+			} else {
+				result.UsedFilenameDate = usedFilenameDate
+				if filenameCreateDateWarned {
+					result.CreateDateWarned = true
+				}
+			}
 		} else {
-			result.UsedFilenameDate = usedFilenameDate
-			if filenameCreateDateWarned {
-				result.CreateDateWarned = true
+			usedFilenameDate, filenameCreateDateWarned, fileDateErr := applyFilenameDate(mediaPath, metadataPath, includeCreateDate, run)
+			if fileDateErr != nil {
+				result.FilenameDateWarned = true
+			} else {
+				result.UsedFilenameDate = usedFilenameDate
+				if filenameCreateDateWarned {
+					result.CreateDateWarned = true
+				}
 			}
 		}
 	}
@@ -135,11 +162,45 @@ func runExiftool(args []string) (string, error) {
 	return string(data), err
 }
 
-func buildExiftoolArgs(jsonPath string, outMediaPath string, includeCreateDate bool) []string {
-	return buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, true, gpsInclusion{true, true})
+var determineWritableForPath = func(path string) (bool, bool) {
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return false, false
+	}
+
+	writable, err := mediaext.IsWritableExtension(ext)
+	if err != nil {
+		return false, false
+	}
+	return writable, true
 }
 
-func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeCreateDate bool, includeJSONDateTags bool, gps gpsInclusion) []string {
+func resolveWriteTargets(mediaPath string) (metadataPath string, mediaDatePath string, useXMPSidecar bool) {
+	if writable, ok := determineWritableForPath(mediaPath); ok {
+		if writable {
+			return mediaPath, mediaPath, false
+		}
+		return mediaPath + ".xmp", mediaPath, true
+	}
+
+	if hasSupportedExtension(mediaPath) {
+		return mediaPath, mediaPath, false
+	}
+	return mediaPath + ".xmp", mediaPath, true
+}
+
+func buildExiftoolArgs(jsonPath string, outMediaPath string, includeCreateDate bool) []string {
+	return buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, true, true, gpsInclusion{true, true})
+}
+
+func buildExiftoolArgsWithOptions(
+	jsonPath string,
+	outMediaPath string,
+	includeCreateDate bool,
+	includeJSONDateTags bool,
+	includeFileSystemDates bool,
+	gps gpsInclusion,
+) []string {
 	args := []string{
 		"-d", "%s",
 		"-m",
@@ -175,7 +236,9 @@ func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeC
 
 	if includeJSONDateTags {
 		args = append(args, "-AllDates<PhotoTakenTimeTimestamp")
-		args = append(args, "-FileModifyDate<PhotoTakenTimeTimestamp")
+		if includeFileSystemDates {
+			args = append(args, "-FileModifyDate<PhotoTakenTimeTimestamp")
+		}
 	}
 
 	if includeJSONDateTags && isHEIFContainer(outMediaPath) {
@@ -192,7 +255,7 @@ func buildExiftoolArgsWithOptions(jsonPath string, outMediaPath string, includeC
 		)
 	}
 
-	if includeJSONDateTags && includeCreateDate {
+	if includeJSONDateTags && includeCreateDate && includeFileSystemDates {
 		args = append(args, "-FileCreateDate<PhotoTakenTimeTimestamp")
 	}
 
@@ -210,15 +273,30 @@ func applyJSONMetadata(
 	outMediaPath string,
 	includeCreateDate bool,
 	includeJSONDateTags bool,
+	includeFileSystemDates bool,
 	run func(args []string) (string, error),
 ) (bool, error) {
 	gps := detectGPSInclusion(jsonPath)
-	args := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeJSONDateTags, gps)
+	args := buildExiftoolArgsWithOptions(
+		jsonPath,
+		outMediaPath,
+		includeCreateDate,
+		includeJSONDateTags,
+		includeFileSystemDates,
+		gps,
+	)
 	output, err := run(args)
 	if err != nil {
-		if includeJSONDateTags && includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
+		if includeJSONDateTags && includeFileSystemDates && includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
 			// Some filesystems and formats may not support FileCreateDate writes.
-			retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeJSONDateTags, gps)
+			retryArgs := buildExiftoolArgsWithOptions(
+				jsonPath,
+				outMediaPath,
+				false,
+				includeJSONDateTags,
+				includeFileSystemDates,
+				gps,
+			)
 			retryOutput, retryErr := run(retryArgs)
 			if retryErr == nil {
 				return true, nil
@@ -232,13 +310,27 @@ func applyJSONMetadata(
 		if looksLikeCorruptExif(output) {
 			stripArgs := []string{"-all=", "-overwrite_original", patharg.Safe(outMediaPath)}
 			if _, stripErr := run(stripArgs); stripErr == nil {
-				retryArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, includeCreateDate, includeJSONDateTags, gps)
+				retryArgs := buildExiftoolArgsWithOptions(
+					jsonPath,
+					outMediaPath,
+					includeCreateDate,
+					includeJSONDateTags,
+					includeFileSystemDates,
+					gps,
+				)
 				retryOutput, retryErr := run(retryArgs)
 				if retryErr == nil {
 					return false, nil
 				}
-				if includeJSONDateTags && includeCreateDate && strings.Contains(strings.ToLower(retryOutput), "filecreatedate") {
-					fallbackArgs := buildExiftoolArgsWithOptions(jsonPath, outMediaPath, false, includeJSONDateTags, gps)
+				if includeJSONDateTags && includeFileSystemDates && includeCreateDate && strings.Contains(strings.ToLower(retryOutput), "filecreatedate") {
+					fallbackArgs := buildExiftoolArgsWithOptions(
+						jsonPath,
+						outMediaPath,
+						false,
+						includeJSONDateTags,
+						includeFileSystemDates,
+						gps,
+					)
 					fallbackOutput, fallbackErr := run(fallbackArgs)
 					if fallbackErr == nil {
 						return true, nil
@@ -252,6 +344,89 @@ func applyJSONMetadata(
 		return false, fmt.Errorf("could not fix metadata for %s\nerror: %w\noutput: %s", mediaPath, err, output)
 	}
 	return false, nil
+}
+
+func applyMediaFileDatesFromJSON(
+	mediaPath string,
+	jsonPath string,
+	includeCreateDate bool,
+	run func(args []string) (string, error),
+) (bool, error) {
+	args := buildMediaFileDateArgsFromJSON(mediaPath, jsonPath, includeCreateDate)
+	output, err := run(args)
+	if err == nil {
+		return false, nil
+	}
+
+	if includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
+		retryArgs := buildMediaFileDateArgsFromJSON(mediaPath, jsonPath, false)
+		retryOutput, retryErr := run(retryArgs)
+		if retryErr == nil {
+			return true, nil
+		}
+		return false, fmt.Errorf("could not apply media file dates for %s\nerror: %w\noutput: %s", mediaPath, retryErr, retryOutput)
+	}
+
+	return false, fmt.Errorf("could not apply media file dates for %s\nerror: %w\noutput: %s", mediaPath, err, output)
+}
+
+func buildMediaFileDateArgsFromJSON(mediaPath string, jsonPath string, includeCreateDate bool) []string {
+	args := []string{
+		"-d", "%s",
+		"-m",
+		"-TagsFromFile", patharg.Safe(jsonPath),
+		"-FileModifyDate<PhotoTakenTimeTimestamp",
+	}
+
+	if includeCreateDate {
+		args = append(args, "-FileCreateDate<PhotoTakenTimeTimestamp")
+	}
+
+	args = append(args, "-overwrite_original", patharg.Safe(mediaPath))
+	return args
+}
+
+func applyMediaFileDatesFromFilename(
+	mediaPath string,
+	includeCreateDate bool,
+	run func(args []string) (string, error),
+) (bool, bool, error) {
+	parsed, ok := parseFilenameDate(mediaPath)
+	if !ok {
+		return false, false, nil
+	}
+
+	formatted := parsed.Format("2006:01:02 15:04:05")
+	args := buildMediaFileDateArgs(mediaPath, formatted, includeCreateDate)
+	output, err := run(args)
+	if err == nil {
+		return true, false, nil
+	}
+
+	if includeCreateDate && strings.Contains(strings.ToLower(output), "filecreatedate") {
+		retryArgs := buildMediaFileDateArgs(mediaPath, formatted, false)
+		retryOutput, retryErr := run(retryArgs)
+		if retryErr == nil {
+			return true, true, nil
+		}
+		return false, false, fmt.Errorf("could not apply media file dates for %s\nerror: %w\noutput: %s", mediaPath, retryErr, retryOutput)
+	}
+
+	return false, false, fmt.Errorf("could not apply media file dates for %s\nerror: %w\noutput: %s", mediaPath, err, output)
+}
+
+func buildMediaFileDateArgs(mediaPath string, formattedDate string, includeCreateDate bool) []string {
+	args := []string{
+		"-m",
+		"-FileModifyDate=" + formattedDate,
+	}
+
+	if includeCreateDate {
+		args = append(args, "-FileCreateDate="+formattedDate)
+	}
+
+	args = append(args, "-overwrite_original", patharg.Safe(mediaPath))
+	return args
 }
 
 func applyFilenameDate(

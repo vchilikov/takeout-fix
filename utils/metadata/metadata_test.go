@@ -29,6 +29,15 @@ func TestHasSupportedExtension(t *testing.T) {
 	}
 }
 
+func stubWritableDecision(t *testing.T, fn func(path string) (bool, bool)) {
+	t.Helper()
+	orig := determineWritableForPath
+	determineWritableForPath = fn
+	t.Cleanup(func() {
+		determineWritableForPath = orig
+	})
+}
+
 func TestBuildExiftoolArgs_DoesNotIncludeOffsetTags(t *testing.T) {
 	args := buildExiftoolArgs("meta.json", "photo.jpg", true)
 
@@ -131,7 +140,7 @@ func TestBuildExiftoolArgs_GeoDataExifComesAfterGeoData(t *testing.T) {
 }
 
 func TestBuildExiftoolArgsWithOptions_ExcludesDateTagsWhenDisabled(t *testing.T) {
-	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, false, gpsInclusion{true, true})
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, false, true, gpsInclusion{true, true})
 	for _, arg := range args {
 		if strings.Contains(arg, "PhotoTakenTimeTimestamp") {
 			t.Fatalf("did not expect date mapping when disabled, got: %v", args)
@@ -294,6 +303,153 @@ func TestApplyDetailedWithRunner_FileCreateDateFallbackAfterStrip(t *testing.T) 
 	}
 	if callCount != 4 {
 		t.Fatalf("expected 4 runner calls, got %d", callCount)
+	}
+}
+
+func TestApplyDetailedWithRunner_NonWritableUsesXMPSidecarAndWarnsOnMediaDateFailure(t *testing.T) {
+	stubWritableDecision(t, func(path string) (bool, bool) {
+		if filepath.Ext(path) == ".avi" {
+			return false, true
+		}
+		return true, true
+	})
+
+	jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"1719835200"}}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if !slices.Contains(args, "-AllDates<PhotoTakenTimeTimestamp") {
+				t.Fatalf("expected JSON date mappings in sidecar write, args: %v", args)
+			}
+			if slices.Contains(args, "-FileModifyDate<PhotoTakenTimeTimestamp") {
+				t.Fatalf("did not expect file date mapping in sidecar write, args: %v", args)
+			}
+			if !slices.Contains(args, "clip.avi.xmp") {
+				t.Fatalf("expected sidecar write target clip.avi.xmp, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		case 2:
+			if !slices.Contains(args, "-FileModifyDate<PhotoTakenTimeTimestamp") {
+				t.Fatalf("expected media file date mapping call, args: %v", args)
+			}
+			if !slices.Contains(args, "clip.avi") {
+				t.Fatalf("expected media date target to be original file, args: %v", args)
+			}
+			return "Error: failed to update file dates\n", fmt.Errorf("exiftool failed")
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("clip.avi", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.UsedXMPSidecar {
+		t.Fatalf("expected UsedXMPSidecar=true")
+	}
+	if !result.MediaFileDateWarned {
+		t.Fatalf("expected MediaFileDateWarned=true")
+	}
+	if result.FilenameDateWarned {
+		t.Fatalf("did not expect FilenameDateWarned=true")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two exiftool calls, got %d", calls)
+	}
+}
+
+func TestApplyDetailedWithRunner_NonWritableMissingTimestampUsesFilenameDateOnOriginalFile(t *testing.T) {
+	stubWritableDecision(t, func(path string) (bool, bool) {
+		if filepath.Ext(path) == ".avi" {
+			return false, true
+		}
+		return true, true
+	})
+
+	jsonPath := writeJSONFixture(t, `{"title":"x"}`)
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if slices.Contains(args, "-AllDates<PhotoTakenTimeTimestamp") {
+				t.Fatalf("did not expect JSON date mapping when timestamp missing, args: %v", args)
+			}
+			if !slices.Contains(args, "2013-06-11 16.19.16.avi.xmp") {
+				t.Fatalf("expected sidecar target, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		case 2:
+			if !slices.Contains(args, "-FileModifyDate=2013:06:11 16:19:16") {
+				t.Fatalf("expected filename-derived file date assignment, args: %v", args)
+			}
+			if slices.Contains(args, "-DateTimeOriginal=2013:06:11 16:19:16") {
+				t.Fatalf("did not expect metadata date tags on non-writable media, args: %v", args)
+			}
+			if !slices.Contains(args, "2013-06-11 16.19.16.avi") {
+				t.Fatalf("expected original media target, args: %v", args)
+			}
+			return "Error: failed to update file dates\n", fmt.Errorf("exiftool failed")
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	result, err := ApplyDetailedWithRunner("2013-06-11 16.19.16.avi", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.UsedXMPSidecar {
+		t.Fatalf("expected UsedXMPSidecar=true")
+	}
+	if result.UsedFilenameDate {
+		t.Fatalf("expected UsedFilenameDate=false when media file date write fails")
+	}
+	if !result.FilenameDateWarned {
+		t.Fatalf("expected FilenameDateWarned=true")
+	}
+	if !result.MediaFileDateWarned {
+		t.Fatalf("expected MediaFileDateWarned=true")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two exiftool calls, got %d", calls)
+	}
+}
+
+func TestApplyDetailedWithRunner_WritableFormatsStillWriteDirectly(t *testing.T) {
+	stubWritableDecision(t, func(path string) (bool, bool) {
+		if filepath.Ext(path) == ".jpg" {
+			return true, true
+		}
+		return false, true
+	})
+
+	jsonPath := writeJSONFixture(t, `{"photoTakenTime":{"timestamp":"1719835200"}}`)
+	runner := func(args []string) (string, error) {
+		if !slices.Contains(args, "photo.jpg") {
+			t.Fatalf("expected direct write target for writable media, args: %v", args)
+		}
+		if slices.Contains(args, "photo.jpg.xmp") {
+			t.Fatalf("did not expect sidecar target for writable media, args: %v", args)
+		}
+		if !slices.Contains(args, "-FileModifyDate<PhotoTakenTimeTimestamp") {
+			t.Fatalf("expected file date mapping for writable media, args: %v", args)
+		}
+		return "1 image files updated\n", nil
+	}
+
+	result, err := ApplyDetailedWithRunner("photo.jpg", jsonPath, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.UsedXMPSidecar {
+		t.Fatalf("expected UsedXMPSidecar=false")
+	}
+	if result.MediaFileDateWarned {
+		t.Fatalf("did not expect MediaFileDateWarned=true")
 	}
 }
 
@@ -472,6 +628,80 @@ func TestApplyFilenameDate_FileCreateDateRetryKeepsMinorWarningMode(t *testing.T
 	}
 	if calls != 2 {
 		t.Fatalf("expected two calls, got %d", calls)
+	}
+}
+
+func TestApplyMediaFileDatesFromJSON_FileCreateDateRetry(t *testing.T) {
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		switch calls {
+		case 1:
+			if !slices.Contains(args, "-FileCreateDate<PhotoTakenTimeTimestamp") {
+				t.Fatalf("expected FileCreateDate mapping in first call, args: %v", args)
+			}
+			if !slices.Contains(args, "clip.avi") {
+				t.Fatalf("expected media target clip.avi, args: %v", args)
+			}
+			if !slices.Contains(args, "meta.json") {
+				t.Fatalf("expected JSON source meta.json, args: %v", args)
+			}
+			return "Warning: Sorry, FileCreateDate is not supported\n", fmt.Errorf("exiftool failed")
+		case 2:
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "-FileCreateDate<") {
+					t.Fatalf("did not expect FileCreateDate mapping in retry call, args: %v", args)
+				}
+			}
+			if !slices.Contains(args, "clip.avi") {
+				t.Fatalf("expected media target clip.avi in retry, args: %v", args)
+			}
+			return "1 image files updated\n", nil
+		default:
+			return "", fmt.Errorf("unexpected call %d", calls)
+		}
+	}
+
+	createDateWarned, err := applyMediaFileDatesFromJSON("clip.avi", "meta.json", true, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !createDateWarned {
+		t.Fatalf("expected createDateWarned=true")
+	}
+	if calls != 2 {
+		t.Fatalf("expected two calls, got %d", calls)
+	}
+}
+
+func TestApplyMediaFileDatesFromFilename_Success(t *testing.T) {
+	calls := 0
+	runner := func(args []string) (string, error) {
+		calls++
+		if !slices.Contains(args, "-FileModifyDate=2013:06:11 16:19:16") {
+			t.Fatalf("expected FileModifyDate assignment, args: %v", args)
+		}
+		if !slices.Contains(args, "-FileCreateDate=2013:06:11 16:19:16") {
+			t.Fatalf("expected FileCreateDate assignment, args: %v", args)
+		}
+		if !slices.Contains(args, "2013-06-11 16.19.16.avi") {
+			t.Fatalf("expected media target path, args: %v", args)
+		}
+		return "1 image files updated\n", nil
+	}
+
+	used, warned, err := applyMediaFileDatesFromFilename("2013-06-11 16.19.16.avi", true, runner)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !used {
+		t.Fatalf("expected used=true")
+	}
+	if warned {
+		t.Fatalf("expected warned=false")
+	}
+	if calls != 1 {
+		t.Fatalf("expected one call, got %d", calls)
 	}
 }
 
@@ -713,7 +943,7 @@ func TestDetectGPSInclusion_UnreadableFile(t *testing.T) {
 }
 
 func TestBuildExiftoolArgs_ExcludesGeoDataGPSWhenZero(t *testing.T) {
-	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, gpsInclusion{false, true})
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, true, gpsInclusion{false, true})
 
 	for _, arg := range args {
 		if strings.Contains(arg, "GeoDataLatitude") && !strings.Contains(arg, "GeoDataExif") {
@@ -729,7 +959,7 @@ func TestBuildExiftoolArgs_ExcludesGeoDataGPSWhenZero(t *testing.T) {
 }
 
 func TestBuildExiftoolArgs_ExcludesAllGPSWhenBothZero(t *testing.T) {
-	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, gpsInclusion{false, false})
+	args := buildExiftoolArgsWithOptions("meta.json", "photo.jpg", true, true, true, gpsInclusion{false, false})
 
 	for _, arg := range args {
 		if strings.Contains(arg, "GPS") {
