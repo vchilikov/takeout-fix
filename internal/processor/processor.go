@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -83,11 +84,7 @@ func RunWithProgress(rootPath string, onProgress func(ProgressEvent)) (Report, e
 	}
 	jsonSuccessCount := make(map[string]int, len(jsonPairCount))
 
-	mediaFiles := make([]string, 0, len(scanResult.Pairs))
-	for mediaFile := range scanResult.Pairs {
-		mediaFiles = append(mediaFiles, mediaFile)
-	}
-	slices.Sort(mediaFiles)
+	mediaFiles := slices.Sorted(maps.Keys(scanResult.Pairs))
 	total := len(mediaFiles)
 
 	if total > 0 {

@@ -2,6 +2,7 @@ package files
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -120,12 +121,7 @@ func findSupplementalJSONByStem(stem string, jsonFiles map[string]struct{}) []st
 		}
 	}
 
-	matches := make([]string, 0, len(unique))
-	for jsonFile := range unique {
-		matches = append(matches, jsonFile)
-	}
-	slices.Sort(matches)
-	return matches
+	return slices.Sorted(maps.Keys(unique))
 }
 
 func findJSONCaseInsensitive(name string, jsonFiles map[string]struct{}) (string, bool) {

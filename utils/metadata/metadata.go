@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -568,12 +569,9 @@ func looksLikeCorruptExif(output string) bool {
 
 func hasSupportedExtension(path string) bool {
 	ext := filepath.Ext(path)
-	for _, supportedExt := range mediaext.Supported {
-		if strings.EqualFold(ext, supportedExt) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(mediaext.Supported, func(s string) bool {
+		return strings.EqualFold(ext, s)
+	})
 }
 
 func isHEIFContainer(path string) bool {
